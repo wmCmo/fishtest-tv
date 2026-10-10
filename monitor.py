@@ -802,7 +802,8 @@ const EXP={
  lat:"Round-trip time of server calls. <b>Wall</b> = total time your worker waited (includes network). <b>Server</b> = time the Fishtest server itself spent. Occasional spikes are network hiccups, not worker problems.",
  events:"A live tail of every API call your worker makes, newest first — the raw pulse of the worker talking to the server.",
  pgn:"<b>PGN</b> files are the game records fastchess writes to disk as each batch finishes, then uploads to the server. Newest first, with file size and age.",
- disk:"What the <code>testing/</code> folder is made of, by size. <b>NNUE nets</b> (the engine's neural-network eval files) and <b>opening books</b> dominate. <b>Can I tell which file 'passed'?</b> No — the <code>stockfish-&lt;sha&gt;.exe</code> files are just candidate builds; whether a patch helps is an <b>SPRT verdict decided server-side</b> across all workers, never stored locally. <b>Safe to delete?</b> Yes — anything not referenced by the current task is a leftover the worker re-downloads on demand. Green-outlined files are in use (keep); the rest are reclaimable. <span style='color:var(--amber)'>Only delete while the worker is idle — a running task holds its files open.</span>"
+ disk:"What the <code>testing/</code> folder is made of, by size. <b>NNUE nets</b> (the engine's neural-network eval files) and <b>opening books</b> dominate. <b>Can I tell which file 'passed'?</b> No — the <code>stockfish-&lt;sha&gt;.exe</code> files are just candidate builds; whether a patch helps is an <b>SPRT verdict decided server-side</b> across all workers, never stored locally. <b>Safe to delete?</b> Yes — anything not referenced by the current task is a leftover the worker re-downloads on demand. Green-outlined files are in use (keep); the rest are reclaimable. <span style='color:var(--amber)'>Only delete while the worker is idle — a running task holds its files open.</span>",
+ trophy:"Every test your worker played games for since your local record starts, grouped by what happened to it. <b>In Stockfish</b> = the patch's branch was later merged into Stockfish master (matched by commit message, checked once a day). <b>Passed, not merged</b> = it passed SPRT but no matching master commit yet (often an STC pass waiting for LTC, or still in review). <b>Still undecided</b> = your worker already played its share of games for these tests, but the tests themselves are still running on Fishtest with other people's workers (your PC plays one batch at a time). <b>Not merged</b> = it failed or was stopped. <b>CPU-hours</b> = games × the time control's expected game length × threads, i.e. the compute your machine donated."
 };
 const TIP={
  tc:"Time control: base seconds + increment added per move.",
@@ -810,8 +811,7 @@ const TIP={
  los:"Likelihood of Superiority: chance the new version is truly stronger.",
  ptnml:"Pentanomial: game-pairs bucketed by combined score [0,½,1,1½,2].",
  conc:"Engine threads per game × games running in parallel.",
- size:"Number of games in this task batch.",
- trophy:"Every test your worker played games for since your local record starts, grouped by what happened to it. <b>In Stockfish</b> = the patch's branch was later merged into Stockfish master (matched by commit message, checked once a day). <b>Passed, not merged</b> = it passed SPRT but no matching master commit yet (often an STC pass waiting for LTC, or still in review). <b>Still undecided</b> = your worker already played its share of games for these tests, but the tests themselves are still running on Fishtest with other people's workers (your PC plays one batch at a time). <b>Not merged</b> = it failed or was stopped. <b>CPU-hours</b> = games × the time control's expected game length × threads, i.e. the compute your machine donated."
+ size:"Number of games in this task batch."
 };
 const fmtAge=s=>s==null?"—":s<90?`${s|0}s ago`:s<5400?`${(s/60)|0}m ago`:`${(s/3600).toFixed(1)}h ago`;
 const fmtDur=s=>{if(s==null)return"—";s=Math.round(s);if(s<60)return s+"s";const m=Math.floor(s/60);if(m<60)return m+"m "+(s%60)+"s";const h=Math.floor(m/60);return h+"h "+(m%60)+"m";};
@@ -981,7 +981,11 @@ const OUTCOMES=[["merged","In Stockfish","var(--green-b)"],["passed","Passed, no
   ["running","Still undecided","var(--amber)"],["not merged","Not merged","#55655d"]];
 const num=n=>Number(n||0).toLocaleString("en-US");
 async function loadTrophy(){
-  let d;try{d=await (await fetch("/impact")).json()}catch{return}
+  // 初回の集計中は「集計中」と出しておく（何も出ないと消えたように見える）
+  const el0=document.getElementById("trophy");
+  if(el0.style.display==="none"){el0.innerHTML=`<h2>Your contribution</h2><div class="sub">🏆 Counting your contribution… (takes up to half a minute right after the monitor starts)</div>`;el0.style.display="block"}
+  // 取れなかったら（モニターの再起動中など）15 秒後にやり直す。10 分待たせない
+  let d;try{d=await (await fetch("/impact")).json()}catch{setTimeout(loadTrophy,15000);return}
   const T=d.totals||{},all=Object.values(T);
   const tests=all.reduce((n,t)=>n+t.tests,0),games=all.reduce((n,t)=>n+t.games,0),hours=all.reduce((n,t)=>n+t.cpu_hours,0);
   if(!tests)return;
@@ -2173,6 +2177,8 @@ def main():
     if not os.path.exists(os.path.join(WORKER, "worker.py")):
         print(f"warning: no worker.py in {WORKER} (set FISHTEST_WORKER or --worker)")
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
+    # 貢献カードの集計は起動直後だと Fishtest への問い合わせで 20 秒ほどかかるので、ページが開かれる前に裏で済ませておく
+    threading.Thread(target=impact, daemon=True).start()
     url = f"http://{args.host}:{args.port}"
     print(f"Fishtest worker monitor -> {url}  (Ctrl+C to stop)")
     print(f"Across-the-room view    -> {url}/tv")
