@@ -1,0 +1,7 @@
+# 実行時のデータ（貢献の台帳・リモコンの PIN・スカウティングレポート・Stockfish の履歴）。公開しない
+tv-cache/
+
+__pycache__/
+*.pyc
+*.bak*
+.claude/settings.local.json

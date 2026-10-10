@@ -1,0 +1,640 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fishtest TV</title>
+<link rel="icon" href="/favicon-tv.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;800;900&display=swap" rel="stylesheet">
+<style>
+  /* 部屋の向こうから見る前提：文字は大きく、情報は少なく、操作は不要。
+     見た目は Duolingo のチェス盤の雰囲気（紺の盤・丸い2トーンの駒・下に厚みのある縁）を、自前の絵で再現している */
+  :root {
+    --bg: #131f24;
+    --card: #1f2f38;
+    --card-lip: #0e171c;
+    --fg: #f1f7fb;
+    --muted: #8aa1ae;
+    --dim: #4f6672;
+    --sq-light: #2a404c;
+    --sq-dark: #172630;
+    --frame: #213440;
+    --frame-lip: #0c161b;
+    --hl: rgba(28, 176, 246, 0.38);
+    --green: #58cc02;
+    --green-lip: #46a302;
+    --red: #ff4b4b;
+    --red-lip: #d33131;
+    --grey: #afbcc4;
+    --grey-lip: #7d8c95;
+    --blue: #1cb0f6;
+    --gold: #ffc800;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+    font-family: "Nunito", "Segoe UI", system-ui, sans-serif; font-weight: 800; overflow: hidden; }
+  body.idle-cursor { cursor: none; }
+
+  #stage { position: absolute; inset: 0 0 15vh 0; display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 4vw; padding: 8vh 4vw 2vh; }
+
+  /* 盤面：角丸の枠と、下側の厚み（リップ） */
+  .left { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 0; }
+  .boardwrap { position: relative; display: flex; gap: 1.6vh; height: min(64vh, 50vw); }
+  #evalbar { position: relative; width: 2.6vh; height: 100%; background: #5b2a30; border-radius: 1.3vh; overflow: hidden;
+    box-shadow: 0 0.6vh 0 var(--frame-lip); }
+  #evalfill { position: absolute; left: 0; right: 0; bottom: 0; height: 50%; background: var(--green);
+    border-radius: 1.3vh; transition: height 0.6s cubic-bezier(.3,1.4,.5,1); }
+  .frame { position: relative; height: 100%; aspect-ratio: 1; padding: 1.2vh; border-radius: 2.4vh;
+    background: var(--frame); box-shadow: 0 0.9vh 0 var(--frame-lip), 0 3vh 6vh rgba(0, 0, 0, 0.45); }
+  #board { position: relative; width: 100%; height: 100%; display: grid;
+    grid-template-columns: repeat(8, minmax(0, 1fr)); grid-template-rows: repeat(8, minmax(0, 1fr)); border-radius: 1.4vh; overflow: hidden; }
+  .sq { position: relative; display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; }
+  .sq.l { background: var(--sq-light); }
+  .sq.d { background: var(--sq-dark); }
+  .sq.hl::before { content: ""; position: absolute; inset: 0; background: var(--hl); }
+  .pc { position: absolute; left: 2%; top: 2%; z-index: 2; width: 96%; height: 96%; will-change: transform; }
+  .pc.land { animation: land 260ms cubic-bezier(.3,1.6,.5,1); }
+  @keyframes land { 0% { transform: scale(1.12) translateY(-4%); } 100% { transform: none; } }
+  #banner { position: absolute; left: 50%; top: 50%; z-index: 5; padding: 2vh 5vh; border-radius: 99vh;
+    font-size: 6vh; font-weight: 900; white-space: nowrap; color: #fff; opacity: 0; pointer-events: none;
+    transform: translate(-50%, -40%) scale(0.85); transition: opacity 0.35s ease, transform 0.45s cubic-bezier(.3,1.6,.5,1); }
+  #banner.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  #banner.win { background: var(--green); box-shadow: 0 0.9vh 0 var(--green-lip), 0 3vh 6vh rgba(0,0,0,.5); }
+  #banner.loss { background: var(--red); box-shadow: 0 0.9vh 0 var(--red-lip), 0 3vh 6vh rgba(0,0,0,.5); }
+  #banner.draw { background: var(--grey); color: #24343d; box-shadow: 0 0.9vh 0 var(--grey-lip), 0 3vh 6vh rgba(0,0,0,.5); }
+  #matchup { margin-top: 2.6vh; font-size: 2.6vh; color: var(--muted); white-space: nowrap; font-weight: 700; }
+  #matchup b { color: var(--fg); font-weight: 900; }
+
+  /* 右側：カード状のまとまり。数字は大きく、説明は短く */
+  .right { display: flex; flex-direction: column; justify-content: center; gap: 2vh; min-width: 0; }
+  .card { background: var(--card); border-radius: 2.2vh; padding: 1.8vh 2.6vh; box-shadow: 0 0.6vh 0 var(--card-lip); }
+  .label { font-size: 1.9vh; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; font-weight: 800; }
+  #status { position: fixed; top: 2.4vh; right: 4vw; z-index: 6; display: inline-flex; align-items: center; gap: 1.2vh;
+    font-size: 2.2vh; font-weight: 900; padding: 1vh 2.2vh; border-radius: 99vh; background: var(--card); box-shadow: 0 0.5vh 0 var(--card-lip); }
+  #status .dot { width: 1.6vh; height: 1.6vh; border-radius: 50%; background: var(--dim); }
+  #status.on .dot { background: var(--green); animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(88, 204, 2, 0.6); } 50% { box-shadow: 0 0 0 1.4vh rgba(88, 204, 2, 0); } }
+  #patch { font-size: 7.5vh; font-weight: 900; letter-spacing: -0.02em; line-height: 1.05; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sub { font-size: 2.4vh; color: var(--muted); margin-top: 0.6vh; font-weight: 700; }
+  .score { display: flex; gap: 3vw; margin-top: 1vh; }
+  .score div { display: flex; flex-direction: column; }
+  .score .n { font-size: 7.5vh; font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; }
+  .score .k { font-size: 1.9vh; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; margin-top: 0.6vh; }
+  .w .n { color: var(--green); } .l .n { color: var(--red); } .d .n { color: var(--grey); }
+  .meter { height: 2vh; border-radius: 99vh; background: #0e1a20; overflow: hidden; margin-top: 1.2vh; }
+  .meter > div { height: 100%; width: 0; border-radius: 99vh; transition: width 1s ease;
+    box-shadow: inset 0 -0.5vh 0 rgba(0, 0, 0, 0.18), inset 0 0.4vh 0 rgba(255, 255, 255, 0.25); }
+  .score .o { margin-left: auto; align-items: flex-end; }
+  .score .o .n { color: var(--gold); }
+  #brief { margin-top: 1.4vh; display: none; }
+  #brief.show { display: block; }
+  #headline { font-size: 2.7vh; font-weight: 900; color: var(--gold); line-height: 1.2; }
+  #explain { margin-top: 0.6vh; font-size: 2vh; font-weight: 700; color: var(--muted); line-height: 1.35;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .chips { display: flex; gap: 1vh; margin-top: 1vh; }
+  .chip { font-size: 1.6vh; font-weight: 900; text-transform: uppercase; letter-spacing: 0.08em; padding: 0.5vh 1.2vh;
+    border-radius: 99vh; background: #2b4150; color: var(--fg); }
+  .chip:empty { display: none; }
+  .chip.simplification { background: #1f4a5e; color: #8fd9ff; }
+  .chip.gainer { background: #2f4a1a; color: #a8f06a; }
+  #losFill { background: var(--gold); }
+  #progFill { background: var(--blue); }
+  #progText { font-size: 2.4vh; color: var(--muted); margin-top: 1vh; font-variant-numeric: tabular-nums; font-weight: 700; }
+  #moves { margin-top: 1.2vh; font-size: 3vh; font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; overflow: hidden; min-height: 4vh; font-weight: 700; }
+  #moves .last { color: var(--fg); font-weight: 900; }
+
+  /* 下：この対局の評価値の推移 */
+  #graphwrap { position: absolute; left: 4vw; right: 4vw; bottom: 2.5vh; height: 10vh; }
+  #graph { width: 100%; height: 100%; display: block; overflow: visible; }
+  #graphLabel { position: absolute; right: 0; top: 0; font-size: 1.7vh; color: var(--dim); letter-spacing: 0.1em; text-transform: uppercase; }
+
+  /* 実況の字幕（盤の下部に重ねる）と、実況のオン/オフ表示 */
+  #caption { position: absolute; left: 4%; right: 4%; bottom: 3.5%; z-index: 4; padding: 1.4vh 2.2vh; border-radius: 1.8vh;
+    background: rgba(19, 31, 36, 0.92); box-shadow: 0 0.6vh 0 var(--card-lip); font-size: 2.6vh; line-height: 1.3;
+    font-weight: 800; color: var(--fg); opacity: 0; transform: translateY(1vh); transition: opacity 0.3s, transform 0.3s; pointer-events: none; }
+  #caption.show { opacity: 1; transform: none; }
+  #caption.quiet { color: var(--muted); font-weight: 700; }
+  #narr { position: fixed; top: 2.4vh; left: 4vw; z-index: 6; display: inline-flex; align-items: center; gap: 1vh; font-size: 2vh;
+    font-weight: 900; padding: 1vh 2vh; border-radius: 99vh; background: var(--card); box-shadow: 0 0.5vh 0 var(--card-lip); color: var(--fg); }
+  #narr.off { color: var(--dim); }
+  #narr .k { color: var(--muted); font-weight: 700; }
+  #impact { position: fixed; top: 2.4vh; left: 50%; transform: translateX(-50%); z-index: 6; white-space: nowrap;
+    font-size: 2vh; font-weight: 900; padding: 1vh 2.2vh; border-radius: 99vh; background: var(--card);
+    box-shadow: 0 0.5vh 0 var(--card-lip); color: var(--gold); opacity: 0; transition: opacity 0.6s; }
+  #impact.show { opacity: 1; }
+  #impact .k { color: var(--muted); font-weight: 700; }
+  #hint { position: fixed; left: 2vw; bottom: 0.6vh; font-size: 1.8vh; color: var(--dim); transition: opacity 1s; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs id="pieceDefs"></defs></svg>
+<div id="stage">
+  <section class="left">
+    <div class="boardwrap">
+      <div id="evalbar"><div id="evalfill"></div></div>
+      <div class="frame"><div id="board"></div><div id="caption"></div></div>
+      <div id="banner"></div>
+    </div>
+    <div id="matchup">loading games…</div>
+    <div id="moves"></div>
+  </section>
+  <section class="right">
+    <div id="status"><span class="dot"></span><span id="statusText">checking…</span></div>
+    <div class="card">
+      <div class="label" id="patchLabel">Your PC is testing a Stockfish patch</div>
+      <div id="patch">—</div>
+      <div class="sub" id="vs">vs Stockfish master</div>
+      <!-- スカウティングレポート：差分から作った「このパッチは何をするのか」 -->
+      <div id="brief">
+        <div id="headline"></div>
+        <div id="explain"></div>
+        <div class="chips"><span class="chip" id="kind"></span><span class="chip" id="diffStat"></span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="label">Patch's results on your PC</div>
+      <div class="score">
+        <div class="w"><span class="n" id="wins">–</span><span class="k">wins</span></div>
+        <div class="l"><span class="n" id="losses">–</span><span class="k">losses</span></div>
+        <div class="d"><span class="n" id="draws">–</span><span class="k">draws</span></div>
+        <div class="o"><span class="n" id="los">–</span><span class="k">chance it's stronger</span></div>
+      </div>
+      <div class="meter"><div id="losFill"></div></div>
+    </div>
+    <div class="card">
+      <div class="label">This batch</div>
+      <div class="meter"><div id="progFill"></div></div>
+      <div id="progText">–</div>
+    </div>
+  </section>
+</div>
+<div id="graphwrap"><div id="graphLabel">evaluation · patch ↑ master ↓</div><svg id="graph" viewBox="0 0 1000 100" preserveAspectRatio="none"></svg></div>
+<div id="hint">click for fullscreen</div>
+<div id="impact"></div>
+<div id="narr"><span id="narrText">🎙 Commentary on</span><span class="k">· n</span></div>
+
+<script type="module">
+import { Chess } from "/vendor/chess.js";
+
+const MOVE_MS = 700        // 1手の間隔（遠目でも追える速さ）
+const START_PAUSE_MS = 1800
+const END_PAUSE_MS = 3800
+const POLL_MS = 5000
+
+const $ = id => document.getElementById(id)
+const boardEl = $("board")
+const sleep = ms => new Promise(r => setTimeout(r, ms))
+
+// ---- 駒の絵（自前の SVG）。各形を「下にずらした濃い色（厚み）」→「本体色」の順に重ねて立体感を出す ----
+const PALETTE = {
+  w: { main: "#e8f0f6", lip: "#a2b7c7", detail: "#567083" },
+  b: { main: "#71909f", lip: "#3e5765", detail: "#dde8ef" },
+}
+const BASE = `<rect x="27" y="72" width="46" height="12" rx="6"/>`
+const SHAPES = {
+  p: `<circle cx="50" cy="34" r="13"/><path d="M36 74 C36 62 42 54 46 49 L54 49 C58 54 64 62 64 74 Z"/><ellipse cx="50" cy="50" rx="11" ry="4"/>${BASE}`,
+  r: `<rect x="33" y="40" width="34" height="34" rx="4"/><path d="M27 26 h11 v7 h7 v-7 h10 v7 h7 v-7 h11 v14 a3 3 0 0 1 -3 3 h-40 a3 3 0 0 1 -3 -3 Z"/>${BASE}`,
+  n: `<path d="M33 74 C33 60 38 52 45 46 C39 47 31 45 29 39 C27 31 40 20 52 18 C67 16 74 30 73 46 C72 58 67 64 67 74 Z"/>${BASE}`,
+  b: `<circle cx="50" cy="17" r="5"/><path d="M37 62 C35 46 44 32 50 24 C56 32 65 46 63 62 Z"/><path d="M40 74 C40 68 44 66 46 63 L54 63 C56 66 60 68 60 74 Z"/><ellipse cx="50" cy="63" rx="14" ry="5"/>${BASE}`,
+  q: `<path d="M30 30 L38 46 L44 24 L50 40 L56 24 L62 46 L70 30 L66 58 L34 58 Z"/><circle cx="30" cy="29" r="4.5"/><circle cx="44" cy="23" r="4.5"/><circle cx="56" cy="23" r="4.5"/><circle cx="70" cy="29" r="4.5"/><path d="M36 74 C36 66 38 62 37 58 L63 58 C62 62 64 66 64 74 Z"/><ellipse cx="50" cy="58" rx="16" ry="5"/>${BASE}`,
+  k: `<rect x="47" y="9" width="6" height="19" rx="2"/><rect x="41" y="14" width="18" height="6" rx="2"/><path d="M30 41 C30 30 41 28 50 34 C59 28 70 30 70 41 C70 51 62 56 60 60 L40 60 C38 56 30 51 30 41 Z"/><path d="M38 74 C38 68 40 64 40 60 L60 60 C60 64 62 68 62 74 Z"/><ellipse cx="50" cy="60" rx="13" ry="4"/>${BASE}`,
+}
+// 形の上に乗せる細部（馬の目と口、ビショップの切れ込みなど）
+const DETAILS = {
+  n: c => `<circle cx="53" cy="31" r="3.2" fill="${c}"/><path d="M36 41 q5 4 10 1" fill="none" stroke="${c}" stroke-width="2.6" stroke-linecap="round"/><path d="M62 21 C70 28 72 40 70 52" fill="none" stroke="${c}" stroke-width="2.6" stroke-linecap="round" opacity="0.35"/>`,
+  b: c => `<path d="M55 35 L46 47" stroke="${c}" stroke-width="3.2" stroke-linecap="round" opacity="0.55"/>`,
+  r: c => `<rect x="38" y="47" width="24" height="3.5" rx="1.7" fill="${c}" opacity="0.3"/>`,
+  q: c => `<circle cx="50" cy="48" r="3" fill="${c}" opacity="0.4"/>`,
+  k: c => ``,
+  p: c => ``,
+}
+const defs = $("pieceDefs")
+for (const color of ["w", "b"]) {
+  for (const type of Object.keys(SHAPES)) {
+    const pal = PALETTE[color]
+    const sym = document.createElementNS("http://www.w3.org/2000/svg", "symbol")
+    sym.id = `pc-${color}${type}`
+    sym.setAttribute("viewBox", "0 0 100 100")
+    sym.innerHTML = `
+      <ellipse cx="50" cy="89" rx="25" ry="5" fill="rgba(0,0,0,0.38)"/>
+      <g fill="${pal.lip}" transform="translate(0 4)">${SHAPES[type]}</g>
+      <g fill="${pal.main}">${SHAPES[type]}</g>
+      <ellipse cx="42" cy="${type === "k" ? 38 : type === "q" ? 50 : type === "r" ? 50 : type === "b" ? 40 : type === "n" ? 30 : 30}" rx="4" ry="6" fill="#fff" opacity="${color === "w" ? 0.55 : 0.18}"/>
+      ${DETAILS[type](pal.detail)}`
+    defs.appendChild(sym)
+  }
+}
+const pieceSvg = (color, type) =>
+  `<svg class="pc" viewBox="14 5 72 88"><use href="#pc-${color}${type}" x="0" y="0" width="100" height="100"/></svg>`
+
+// ---- 盤面（常にパッチ側から見る：パッチの駒が手前） ----
+const squares = {}
+const whiteView = []
+for (let r = 8; r >= 1; r--) {
+  for (let f = 0; f < 8; f++) {
+    const name = "abcdefgh"[f] + r
+    const el = document.createElement("div")
+    el.className = "sq " + ((f + r) % 2 === 1 ? "l" : "d")
+    boardEl.appendChild(el)
+    squares[name] = el
+    whiteView.push(name)
+  }
+}
+const orient = patchWhite => {
+  for (const name of patchWhite ? whiteView : [...whiteView].reverse()) boardEl.appendChild(squares[name])
+}
+
+const draw = (chess, move) => {
+  for (const el of Object.values(squares)) { el.innerHTML = ""; el.classList.remove("hl") }
+  for (const row of chess.board()) {
+    for (const p of row) {
+      if (p) squares[p.square].innerHTML = pieceSvg(p.color, p.type)
+    }
+  }
+  if (!move) return
+  squares[move.from].classList.add("hl")
+  squares[move.to].classList.add("hl")
+  // 動いた駒を元のマスから滑らせ（FLIP）、着地で少し弾ませる
+  const piece = squares[move.to].firstElementChild
+  if (!piece) return
+  const a = squares[move.from].getBoundingClientRect()
+  const b = squares[move.to].getBoundingClientRect()
+  piece.style.transition = "none"
+  piece.style.transform = `translate(${a.left - b.left}px, ${a.top - b.top}px)`
+  piece.getBoundingClientRect()
+  piece.style.transition = `transform ${Math.min(380, MOVE_MS * 0.55)}ms cubic-bezier(.2,.8,.3,1)`
+  piece.style.transform = "none"
+  piece.addEventListener("transitionend", () => piece.classList.add("land"), { once: true })
+}
+
+// ---- 評価値（パッチ側から見た値、ポーン単位。正ならパッチ有利） ----
+// 線形だと ±0.5 程度の揺れが平らに見えるので tanh で圧縮する：小さな優勢も見え、大差は頭打ちになる
+const squash = ev => Math.tanh((ev ?? 0) / 2.5)
+const setEval = ev => {
+  $("evalfill").style.height = `${50 + squash(ev) * 48}%`
+}
+
+const drawGraph = (evals, upto) => {
+  const svg = $("graph")
+  const n = Math.max(evals.length, 2)
+  const y = v => 50 - squash(v) * 46
+  const pts = []
+  for (let i = 0; i <= upto && i < evals.length; i++) pts.push([(i / (n - 1)) * 1000, y(evals[i])])
+  const line = pts.map(p => p.join(",")).join(" ")
+  const area = pts.length ? `0,50 ${line} ${pts[pts.length - 1][0]},50` : ""
+  svg.innerHTML = `
+    <defs>
+      <clipPath id="gAbove"><rect x="0" y="0" width="1000" height="50"/></clipPath>
+      <clipPath id="gBelow"><rect x="0" y="50" width="1000" height="50"/></clipPath>
+    </defs>
+    <line x1="0" y1="50" x2="1000" y2="50" stroke="#2a3d48" stroke-width="2" vector-effect="non-scaling-stroke"/>
+    <polygon points="${area}" fill="rgba(88,204,2,0.22)" clip-path="url(#gAbove)"/>
+    <polygon points="${area}" fill="rgba(255,75,75,0.22)" clip-path="url(#gBelow)"/>
+    <polyline points="${line}" fill="none" stroke="#58cc02" stroke-width="4" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round" clip-path="url(#gAbove)"/>
+    <polyline points="${line}" fill="none" stroke="#ff4b4b" stroke-width="4" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round" clip-path="url(#gBelow)"/>`
+}
+
+// ---- 対局の読み方 ----
+const patchName = event => (event.match(/:\s*(.+?)\s+vs\s+/) || [])[1] || "patch"
+const baseName = event => (event.match(/\s+vs\s+(.+)$/) || [])[1] || "master"
+const isPatch = name => name.startsWith("New")
+const outcome = g => {
+  if (g.result === "1/2-1/2") return { text: "Draw", kind: "draw" }
+  if (g.result !== "1-0" && g.result !== "0-1") return null
+  const whiteWon = g.result === "1-0"
+  const patchWon = whiteWon === isPatch(g.white)
+  return patchWon ? { text: "Patch wins!", kind: "win" } : { text: `${baseName(g.event)} wins`, kind: "loss" }
+}
+const gameKey = g => `${g.white}|${g.black}|${g.fen}|${g.plies}|${g.result}`
+
+const showMoves = (sans, upto, startFullmove, whiteFirst) => {
+  const from = Math.max(0, upto - 5)
+  const parts = []
+  for (let i = from; i <= upto && i < sans.length; i++) {
+    const ply = i + (whiteFirst ? 0 : 1)
+    const num = startFullmove + Math.floor(ply / 2)
+    const label = ply % 2 === 0 ? `${num}. ${sans[i]}` : (i === from ? `${num}… ${sans[i]}` : sans[i])
+    parts.push(i === upto ? `<span class="last">${label}</span>` : label)
+  }
+  $("moves").innerHTML = parts.join("&nbsp;&nbsp;")
+}
+
+// ---- 実況：monitor.py の /commentary が Ollama で台本（手数ごとのセリフ）を作り、Edge の音声で読み上げる ----
+const NARR_KEY = "tv-narrator"
+let narratorOn = (() => { try { return localStorage.getItem(NARR_KEY) !== "off" } catch { return true } })()
+const scripts = new Map()
+
+const requestScript = g => {
+  const key = `${g.file}|${gameKey(g)}`
+  if (!scripts.has(key)) {
+    const game = { event: g.event, white: g.white, black: g.black, result: g.result, fen: g.fen, termination: g.termination, sans: g.sans, evals: g.evals }
+    scripts.set(key, fetch("/commentary", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file: g.file, game }) })
+      .then(r => r.json()).catch(() => ({ error: "monitor unreachable" })))
+  }
+  return scripts.get(key)
+}
+
+// サッカー実況らしく英国英語の男性の自然音声を優先（Edge の「Ryan (Natural)」、Chrome なら「Google UK English Male」）。
+// 英語の音声しか選ばない：Windows の既定音声は日本語（Haruka）なので、選び損ねると英語を日本語の声で読んでしまう
+let voice = null
+const pickVoice = () => {
+  const score = v => (/Ryan/.test(v.name) ? 100 : 0) + (/Google UK English Male/.test(v.name) ? 90 : 0) +
+    (/Natural/.test(v.name) ? 40 : 0) + (v.lang === "en-GB" ? 30 : 0)
+  const english = speechSynthesis.getVoices().filter(v => /^en(-|_|$)/i.test(v.lang))
+  voice = english.sort((a, b) => score(b) - score(a))[0] || null
+  showNarr()
+}
+speechSynthesis.onvoiceschanged = pickVoice
+
+const caption = (text, quiet = false) => {
+  $("caption").textContent = text
+  $("caption").className = text ? (quiet ? "show quiet" : "show") : ""
+}
+
+let speechBlocked = false
+const say = text => new Promise(resolve => {
+  if (!narratorOn || !text) return resolve()
+  if (!voice) pickVoice()
+  // 英語の音声が一つも無ければ読み上げない（字幕だけにする）
+  if (!voice) return setTimeout(resolve, 2500 + text.length * 45)
+  const u = new SpeechSynthesisUtterance(text)
+  u.voice = voice
+  u.lang = voice.lang
+  u.rate = 1.08
+  let started = false
+  const finish = () => { clearTimeout(noStart); clearTimeout(guard); resolve() }
+  u.onstart = () => { started = true; speechBlocked = false }
+  u.onend = finish
+  u.onerror = finish
+  // 自動再生が許されていないと話し始めない。そのときは止まらずに進め、クリックを促す
+  const noStart = setTimeout(() => {
+    if (started) return
+    speechBlocked = true
+    speechSynthesis.cancel()
+    finish()
+  }, 2500)
+  const guard = setTimeout(finish, 25000)
+  speechSynthesis.speak(u)
+})
+
+const voiceLabel = () => voice ? voice.name.replace(/^Microsoft |^Google /, "").replace(/ Online \(Natural\)/, "").replace(/ - .*$/, "") : null
+const showNarr = () => {
+  $("narr").className = narratorOn ? "" : "off"
+  $("narrText").textContent = !narratorOn ? "Commentary off"
+    : speechBlocked ? "🔇 Click to let the commentator speak"
+    : voice ? `🎙 ${voiceLabel()}`
+    : "🎙 Subtitles only · no English voice"
+}
+
+// ---- 再生リスト：新しい対局を優先し、見終えたら古いものを順に回す ----
+let file = null
+let games = []
+const played = new Set()
+
+const loadGames = async name => {
+  const res = await fetch(`/games?file=${encodeURIComponent(name)}`)
+  if (!res.ok) return
+  games = ((await res.json()).games || []).map(g => ({ ...g, file: name }))
+  file = name
+}
+
+// まだ流していない対局のうち一番新しいもの。全部流し終えたら null（同じ対局は繰り返さない）
+const nextGame = () => {
+  for (let i = games.length - 1; i >= 0; i--) {
+    if (!played.has(gameKey(games[i]))) return games[i]
+  }
+  return null
+}
+
+const play = async g => {
+  played.add(gameKey(g))
+  // この対局の台本を頼み、次に流す対局の台本も先に作らせておく（1局あたり数秒かかるため）
+  let lines = null
+  if (narratorOn) {
+    requestScript(g).then(s => { lines = new Map((s.lines || []).map(l => [l.ply, l.text])) })
+    const upcoming = nextGame()
+    if (upcoming && upcoming !== g) requestScript(upcoming)
+  }
+  const chess = new Chess(g.fen)
+  const parts = g.fen.split(" ")
+  const whiteFirst = parts[1] !== "b"
+  const startFullmove = Number(parts[5]) || 1
+  const patchWhite = isPatch(g.white)
+  const patch = patchName(g.event)
+  // 評価値は白番から見た値なので、パッチが黒番なら符号を反転して「上＝パッチ有利」にする
+  const pov = g.evals.map(e => (e == null ? null : patchWhite ? e : -e))
+  orient(patchWhite)
+  $("matchup").innerHTML = `<b>${patch}</b> (${patchWhite ? "white" : "black"}) vs ${baseName(g.event)} (${patchWhite ? "black" : "white"})`
+  $("banner").className = ""
+  $("moves").innerHTML = ""
+  draw(chess)
+  setEval(pov[0])
+  drawGraph(pov, -1)
+  caption("")
+  await sleep(START_PAUSE_MS)
+  // キックオフの一言を待つ（最大15秒）。間に合わなければ実況なしで始め、届いた時点から話す
+  if (narratorOn && lines === null) {
+    caption("The commentator is taking their seat…", true)
+    for (let w = 0; w < 30 && lines === null; w++) await sleep(500)
+    caption("")
+  }
+  for (let i = 0; i < g.sans.length; i++) {
+    let move = null
+    try { move = chess.move(g.sans[i]) } catch { move = null }
+    if (!move) break
+    draw(chess, move)
+    setEval(pov[i])
+    drawGraph(pov, i)
+    showMoves(g.sans, i, startFullmove, whiteFirst)
+    const line = narratorOn ? lines?.get(i) : null
+    if (line) {
+      // セリフの間は盤を止め、言葉と局面をそろえる
+      caption(line)
+      await say(line)
+      showNarr()
+      await sleep(speechBlocked ? 3500 : 300)
+      caption("")
+    } else {
+      await sleep(MOVE_MS)
+    }
+  }
+  const o = outcome(g)
+  if (o) {
+    $("banner").textContent = o.text
+    $("banner").className = `${o.kind} show`
+  }
+  await sleep(END_PAUSE_MS)
+}
+
+// 全部流し終えたら、最後の局面のまま止めて新しい対局を待つ（refresh が新しく終わった対局を取り込むと再開する）
+const loop = async () => {
+  let waiting = false
+  for (;;) {
+    const g = nextGame()
+    if (!g) {
+      if (!waiting && played.size > 0) {
+        waiting = true
+        $("banner").className = ""
+        caption("All caught up · waiting for the next game", true)
+      }
+      await sleep(3000)
+      continue
+    }
+    if (waiting) {
+      waiting = false
+      caption("")
+    }
+    await play(g)
+  }
+}
+
+// ---- 右側の数字と状態 ----
+const fmtAgo = s => s == null ? "" : s < 90 ? `${Math.round(s)}s ago` : s < 5400 ? `${Math.round(s / 60)} min ago` : s < 172800 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} days ago`
+
+// 長いパッチ名（simp-conthist-ply5 など）は、枠に収まるまで文字を小さくする
+const fitText = el => {
+  let size = 7.5
+  el.style.fontSize = `${size}vh`
+  while (el.scrollWidth > el.clientWidth && size > 3.5) {
+    size -= 0.25
+    el.style.fontSize = `${size}vh`
+  }
+}
+
+const refresh = async () => {
+  let d
+  try { d = await (await fetch("/data")).json() } catch { return }
+  const st = $("status")
+  if (d.alive) {
+    st.classList.add("on")
+    $("statusText").textContent = `Working · ${d.current?.concurrency ?? "?"} games at once`
+  } else {
+    st.classList.remove("on")
+    $("statusText").textContent = `Worker stopped · last activity ${fmtAgo(d.last_age_s)} · replaying its games`
+  }
+
+  // 新しいバッチは最初の対局が終わるまで PGN が無い。その間は空欄ではなく「対局中」と出す
+  const gs = d.game_stats
+  const waiting = gs == null && d.alive
+  $("wins").textContent = gs ? gs.wins : waiting ? "0" : "–"
+  $("losses").textContent = gs ? gs.losses : waiting ? "0" : "–"
+  $("draws").textContent = gs ? gs.draws : waiting ? "0" : "–"
+  const los = d.los?.los
+  $("los").textContent = los == null ? (waiting ? "…" : "–") : `${Math.round(los)}%`
+  $("losFill").style.width = los == null ? "0" : `${los}%`
+  const p = d.progress
+  if (p && p.size) {
+    $("progFill").style.width = `${Math.min(100, p.pct ?? 0)}%`
+    const done = p.completed ?? (p.est_done != null ? `≈${p.est_done}` : "?")
+    $("progText").textContent = `${done} / ${p.size} games` + (d.alive && p.rate_per_min ? ` · ${p.rate_per_min.toFixed(1)} per min` : "")
+  }
+
+  // 盤面は一番新しい PGN を再生する（稼働中は終わったばかりの対局を取り込む）
+  const latest = d.pgns?.[0]?.name
+  if (latest && (latest !== file || d.alive)) await loadGames(latest)
+
+  // パッチの名前・開発者・スカウティングレポートは Fishtest の情報から出す（新しいバッチの最初の対局が終わる前でも分かる）
+  $("patchLabel").textContent = d.alive ? "Your PC is testing a Stockfish patch" : "Last patch your PC tested"
+  loadRun(d.current?.run ?? runFromFile(file))
+}
+
+// ---- 貢献：この PC が担当したテストのうち Stockfish 本体に取り込まれたもの（/impact、10分ごと） ----
+const IMPACT_MS = 10 * 60 * 1000
+const loadImpact = async () => {
+  let d
+  try { d = await (await fetch("/impact")).json() } catch { return }
+  const merged = d.totals?.merged
+  const all = Object.values(d.totals || {})
+  const tests = all.reduce((n, t) => n + t.tests, 0)
+  const hours = all.reduce((n, t) => n + t.cpu_hours, 0)
+  const el = $("impact")
+  if (merged) {
+    const n = d.merged_patches
+    el.innerHTML = `🏆 ${n} patch${n === 1 ? "" : "es"} you helped test ${n === 1 ? "is" : "are"} in Stockfish` +
+      ` <span class="k">· ${Math.round(merged.cpu_hours)} of your CPU-hours</span>`
+  } else if (tests) {
+    el.innerHTML = `🏆 ${tests} tests helped <span class="k">· ${Math.round(hours)} CPU-hours · no merges yet</span>`
+  } else {
+    return
+  }
+  el.className = "show"
+}
+// 初回は Fishtest への問い合わせが多く時間がかかることがあるので、盤面の更新とは切り離して非同期に
+loadImpact()
+setInterval(loadImpact, IMPACT_MS)
+
+// ---- パッチの紹介（/runinfo と /briefing）。テストが変わったときだけ取り直す ----
+const runFromFile = f => (String(f || "").match(/^results-([0-9a-f]{24})-/) || [])[1] || null
+let runShown = null
+let runData = null
+let brief = null
+
+const renderPatch = () => {
+  $("patch").textContent = runData?.branch || "—"
+  $("vs").textContent = runData ? `by ${runData.author} · vs Stockfish ${runData.base || "master"}` : ""
+  fitText($("patch"))
+  $("brief").className = brief ? "show" : ""
+  if (!brief) return
+  $("headline").textContent = brief.headline
+  $("explain").textContent = brief.explain
+  $("kind").textContent = brief.kind === "simplification" ? "Non-regression · must not get weaker"
+    : brief.kind === "gainer" ? "Trying to get stronger" : ""
+  $("kind").className = `chip ${brief.kind}`
+  const ds = brief.diff
+  $("diffStat").textContent = ds ? `${ds.files.length} file${ds.files.length === 1 ? "" : "s"} · +${ds.added} −${ds.removed}` : ""
+}
+
+const loadRun = async run => {
+  if (!run || run === runShown) return
+  runShown = run
+  runData = null
+  brief = null
+  try { runData = await (await fetch(`/runinfo?run=${run}`)).json() } catch {}
+  renderPatch()
+  // レポートは初回だけ Ollama で数秒かかる（以降はディスクから）
+  try {
+    const res = await fetch(`/briefing?run=${run}`)
+    if (res.ok && runShown === run) { brief = await res.json(); renderPatch() }
+  } catch {}
+}
+
+// ---- 全画面・カーソル・画面スリープ防止 ----
+pickVoice()
+
+document.addEventListener("click", () => {
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {})
+  // クリックで音声が許可される。次のセリフから話し始める
+  speechBlocked = false
+  showNarr()
+})
+document.addEventListener("keydown", e => {
+  if (e.key === "f") document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.()
+  if (e.key === "n") {
+    narratorOn = !narratorOn
+    try { localStorage.setItem(NARR_KEY, narratorOn ? "on" : "off") } catch {}
+    if (!narratorOn) { speechSynthesis.cancel(); caption("") }
+    showNarr()
+  }
+})
+showNarr()
+let cursorTimer
+document.addEventListener("mousemove", () => {
+  document.body.classList.remove("idle-cursor")
+  $("hint").style.opacity = 1
+  clearTimeout(cursorTimer)
+  cursorTimer = setTimeout(() => { document.body.classList.add("idle-cursor"); $("hint").style.opacity = 0 }, 2500)
+})
+const keepAwake = async () => { try { await navigator.wakeLock?.request("screen") } catch {} }
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") keepAwake() })
+keepAwake()
+setTimeout(() => { $("hint").style.opacity = 0 }, 4000)
+
+await refresh()
+setInterval(refresh, POLL_MS)
+loop()
+</script>
+</body>
+</html>
