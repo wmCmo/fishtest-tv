@@ -71,4 +71,4 @@ python monitor.py --host 0.0.0.0 --worker C:\fishtest\worker
 
 ## ライセンス
 
-`vendor/chess.js` は [chess.js](https://github.com/jhlywa/chess.js)（BSD 2-Clause、著作権表示はファイル冒頭）。
+MIT（[LICENSE](LICENSE)）。ただし `vendor/chess.js` は [chess.js](https://github.com/jhlywa/chess.js)（BSD 2-Clause、著作権表示はファイル冒頭）。
