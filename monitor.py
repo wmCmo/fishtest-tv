@@ -994,15 +994,28 @@ async function loadTrophy(){
   const headline=n
     ?`<span class="big g">${n} patch${n===1?"":"es"} in Stockfish</span><span class="sub">you helped test ${n===1?"it":"them"} with ${Math.round(m.cpu_hours)} CPU-hours</span>`
     :`<span class="big">${tests} tests helped</span><span class="sub">no merges yet</span>`;
-  const tiles=OUTCOMES.filter(([k])=>T[k]).map(([k,label,color])=>`<div class="tile">
+  // 取り込まれたものはコミット（＝パッチ）単位にまとめる。1 つのパッチは STC と LTC の 2 つのテストを持つことが多い
+  const patches=new Map();
+  for(const t of (d.tests||[]).filter(t=>t.outcome==="merged")){
+    const key=t.commit?.sha||t.run;
+    const p=patches.get(key)||{commit:t.commit||{},branch:t.branch,author:t.author,tests:[],games:0,hours:0};
+    p.tests.push(t);p.games+=t.games;p.hours+=t.cpu_hours;patches.set(key,p);
+  }
+  const tcName=tc=>tc==="10+0.1"?"STC":tc==="60+0.6"?"LTC":tc;
+  const tiles=OUTCOMES.filter(([k])=>T[k]).map(([k,label,color])=>{
+    const big=k==="merged"?`${patches.size} patch${patches.size===1?"":"es"}`:`${T[k].tests} test${T[k].tests===1?"":"s"}`;
+    const extra=k==="merged"&&T[k].tests!==patches.size?`${T[k].tests} tests · `:"";
+    return `<div class="tile">
       <div class="lbl"><i style="background:${color}"></i>${label}</div>
-      <b>${T[k].tests} test${T[k].tests===1?"":"s"}</b>
-      <div class="sub">${num(T[k].games)} games · ${num(Math.round(T[k].cpu_hours))} CPU-h</div></div>`).join("");
-  const merged=(d.tests||[]).filter(t=>t.outcome==="merged").map(t=>{
-    const c=t.commit||{},link=c.sha?`https://github.com/official-stockfish/Stockfish/commit/${c.sha}`:null;
-    return `<div class="mrow">🏆 <code>${esc(t.branch)}</code>
+      <b>${big}</b>
+      <div class="sub">${extra}${num(T[k].games)} games · ${num(Math.round(T[k].cpu_hours))} CPU-h</div></div>`;
+  }).join("");
+  const merged=[...patches.values()].sort((a,b)=>(b.commit.date||"").localeCompare(a.commit.date||"")).map(p=>{
+    const c=p.commit,link=c.sha?`https://github.com/official-stockfish/Stockfish/commit/${c.sha}`:null;
+    const kinds=p.tests.map(t=>tcName(t.tc)).join(" + ");
+    return `<div class="mrow">🏆 <code>${esc(p.branch)}</code>
       ${link?`<a href="${escAttr(link)}" target="_blank" rel="noopener">“${esc(c.subject||"commit")}”</a>`:""}
-      <span class="sub">${esc(c.date||"")}${c.sha?" · "+esc(c.sha.slice(0,7)):""} · by ${esc(t.author||"?")} · your ${num(t.games)} games, ${num(Math.round(t.cpu_hours))} CPU-h</span></div>`;
+      <span class="sub">${esc(c.date||"")}${c.sha?" · "+esc(c.sha.slice(0,7)):""} · by ${esc(p.author||"?")} · you played ${esc(kinds)}: ${num(p.games)} games, ${num(Math.round(p.hours))} CPU-h</span></div>`;
   }).join("");
   const el=document.getElementById("trophy"),wasOpen=document.getElementById("exp-trophy")?.classList.contains("open");
   el.innerHTML=`<h2>Your contribution${since?` · since ${esc(since)}`:""}<button class="q" data-k="trophy">?</button></h2>
