@@ -1835,6 +1835,8 @@ REMOTE_PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Fishtest Remote</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <style>
 :root{color-scheme:dark;--bg:#0a0e0d;--panel:#101613;--line:#1d2a23;--text:#e7efe9;--muted:#7d8f85;
   --green:#4cb26a;--green-b:#5fe08a;--red:#f0645b;--amber:#e2a13a;
@@ -2001,7 +2003,43 @@ setInterval(() => {
 setInterval(() => { if (!document.hidden && !busy && $("login").style.display !== "block") refresh() }, 4000)
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh() })
 refresh()
+// ホーム画面のアプリとして入れられるようにする（HTTPS か localhost のときだけ登録できる）
+if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("/sw.js").catch(() => {})
 </script></body></html>"""
+
+# ---- ホーム画面アプリ（PWA）用：マニフェストと Service Worker ----
+STATIC = os.path.join(HERE, "static")
+MANIFEST = json.dumps({
+    "name": "Fishtest Remote",
+    "short_name": "Fishtest",
+    "description": "Start, stop and watch your Fishtest worker from your phone.",
+    "id": "/remote",
+    "start_url": "/remote",
+    "scope": "/",
+    "display": "standalone",
+    "background_color": "#0a0e0d",
+    "theme_color": "#0a0e0d",
+    "icons": [
+        {"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"},
+        {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png"},
+        {"src": "/static/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+    ],
+})
+# 中身はキャッシュしない（状態は常に最新を取りに行く）。PC に届かないときだけ、真っ白ではなく案内を出す
+SERVICE_WORKER = r"""const OFFLINE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fishtest Remote</title><body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#0a0e0d;color:#e7efe9;
+font-family:system-ui,sans-serif;text-align:center;padding:24px"><div><div style="font-size:48px">🐟</div>
+<h1 style="font-size:20px">Can't reach your PC</h1><p style="color:#7d8f85;line-height:1.5">Is the PC on and the monitor running?<br>
+Away from home, check that Tailscale is connected.</p><button onclick="location.reload()" style="margin-top:12px;padding:14px 28px;
+border:0;border-radius:12px;background:#5fe08a;font-size:16px;font-weight:700">Try again</button></div>`
+self.addEventListener("install", () => self.skipWaiting())
+self.addEventListener("activate", e => e.waitUntil(self.clients.claim()))
+self.addEventListener("fetch", e => {
+  if (e.request.mode !== "navigate") return
+  e.respondWith(fetch(e.request).catch(() => new Response(OFFLINE, {headers: {"Content-Type": "text/html; charset=utf-8"}})))
+})
+"""
+STATIC_FILE = re.compile(r"/static/([a-z0-9-]+\.png)")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -2029,7 +2067,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _remote_ok(self):
         """この PC からの接続か、PIN でログイン済みのクッキーを持っているか。"""
-        if self.client_address[0] in LOCAL_CLIENTS:
+        # `tailscale serve`（HTTPS）経由の接続は 127.0.0.1 から届くが、中身はスマホからなので PC 扱いしない
+        proxied = any(self.headers.get(h) for h in ("X-Forwarded-For", "Tailscale-User-Login", "Forwarded"))
+        if self.client_address[0] in LOCAL_CLIENTS and not proxied:
             return True
         cookie = SimpleCookie()
         try:
@@ -2051,7 +2091,9 @@ class Handler(BaseHTTPRequestHandler):
         if not self._host_ok():
             self.send_error(403)
             return
-        public = route in FAVICONS or route in ("/favicon.ico", "/remote")
+        static = STATIC_FILE.fullmatch(route)
+        public = (route in FAVICONS or static is not None
+                  or route in ("/favicon.ico", "/remote", "/manifest.webmanifest", "/sw.js"))
         if not public and not self._remote_ok():
             if route == "/":
                 self.send_response(302)
@@ -2064,6 +2106,16 @@ class Handler(BaseHTTPRequestHandler):
             self._send(REMOTE_PAGE, "text/html; charset=utf-8")
         elif route == "/remote/status":
             self._json(remote_status())
+        elif route == "/manifest.webmanifest":
+            self._send(MANIFEST, "application/manifest+json")
+        elif route == "/sw.js":
+            self._send(SERVICE_WORKER, "text/javascript; charset=utf-8")
+        elif static is not None:
+            try:
+                with open(os.path.join(STATIC, static.group(1)), "rb") as f:
+                    self._send(f.read(), "image/png")
+            except OSError:
+                self.send_error(404)
         elif route in FAVICONS or route == "/favicon.ico":
             # /favicon.ico はリンクを読まない場面（ブックマーク等）向けに、モニターの SVG を返す
             self._send(FAVICONS.get(route, FAVICONS["/favicon.svg"]), "image/svg+xml")

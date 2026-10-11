@@ -61,6 +61,22 @@ python monitor.py --host 0.0.0.0 --worker C:\fishtest\worker
 - 操作ボタンの POST は独自ヘッダーが必須で、ほかのサイトから押させることはできない。Host ヘッダーは IP・localhost・`*.ts.net` だけ受け付ける
 - 通信は暗号化されない（http）。ルーターでポートを開けて公開しないこと。外出先から使うなら Tailscale を使い、Windows ファイアウォールでポート 8787 を Tailscale のインターフェースにだけ許可する
 
+## スマホのホーム画面に入れる（PWA）
+
+リモコンはホーム画面アプリとして入れられる（アドレスバーのない独立したウィンドウで開く）。
+ブラウザがアプリとして入れてくれるのは HTTPS のページだけなので、Tailscale の HTTPS を使う:
+
+```powershell
+tailscale serve --bg 8787
+```
+
+表示された `https://<PC の名前>.<tailnet>.ts.net/remote` をスマホで開き、ブラウザのメニューから「ホーム画面に追加」を選ぶ。
+`tailscale serve` 経由の接続も PIN が要る（PC 自身からの接続とは見なさない）。やめるときは `tailscale serve reset`。
+
+`http://` の URL でもホーム画面には追加できるが、その場合はブラウザのタブで開くショートカットになる。
+
+アイコンは `python tools/make_icons.py` で作り直せる（Pillow が要る）。
+
 ## データ
 
 実行時のデータは `tv-cache\`（Git の管理外）に置く。
