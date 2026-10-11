@@ -67,11 +67,15 @@ python monitor.py --host 0.0.0.0 --worker C:\fishtest\worker
 ブラウザがアプリとして入れてくれるのは HTTPS のページだけなので、Tailscale の HTTPS を使う:
 
 ```powershell
-tailscale serve --bg 8787
+tailscale serve --bg --https=8443 8787
 ```
 
-表示された `https://<PC の名前>.<tailnet>.ts.net/remote` をスマホで開き、ブラウザのメニューから「ホーム画面に追加」を選ぶ。
-`tailscale serve` 経由の接続も PIN が要る（PC 自身からの接続とは見なさない）。やめるときは `tailscale serve reset`。
+`https://<PC の名前>.<tailnet>.ts.net:8443/remote` をスマホで開き、ブラウザのメニューから「ホーム画面に追加」を選ぶ。
+`tailscale serve` 経由の接続も PIN が要る（PC 自身からの接続とは見なさない）。やめるときは `tailscale serve --https=8443 off`。
+
+既定の 443 番ではなく 8443 番を使うのは、同じ PC の名前（443 番）で別の PWA を入れていると、
+その PWA がアドレス全体を自分のものとして開いてしまうため（ポートが違えば別のサイトとして扱われる）。
+`tailscale serve reset` はほかのアプリの設定まで消すので使わない。
 
 `http://` の URL でもホーム画面には追加できるが、その場合はブラウザのタブで開くショートカットになる。
 
