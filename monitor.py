@@ -1714,13 +1714,45 @@ def impact():
             agg["games"] += t["games"]
             agg["cpu_hours"] = round(agg["cpu_hours"] + t["cpu_hours"], 2)
         merged_patches = {t["commit"]["sha"] for t in tests if t["commit"]}
-        return {
+        result = {
             "username": username,
             "since": min((t["first_seen"] for t in tests if t["first_seen"]), default=None),
             "totals": totals,
             "merged_patches": len(merged_patches),
             "tests": tests,
         }
+        _impact_snapshot.update(at=time.time(), data=result)
+        _write_json(IMPACT_SNAPSHOT, result)
+        return result
+
+
+# The trophy is served from the last snapshot (memory, else disk) so a page never waits on Fishtest.
+# A snapshot older than IMPACT_FRESH_S is returned as-is and refreshed in the background.
+IMPACT_SNAPSHOT = os.path.join(CACHE, "impact.json")
+IMPACT_FRESH_S = 120
+_impact_snapshot = {"at": 0.0, "data": None}
+_impact_refreshing = threading.Lock()
+
+
+def _refresh_impact():
+    if not _impact_refreshing.acquire(blocking=False):
+        return  # a refresh is already running
+    try:
+        impact()
+    except Exception as e:  # keep serving the old snapshot
+        print(f"impact refresh failed: {e}")
+    finally:
+        _impact_refreshing.release()
+
+
+def impact_fast():
+    if _impact_snapshot["data"] is None:
+        _impact_snapshot["data"] = _read_json(IMPACT_SNAPSHOT, None)  # at stays 0: counts as stale
+    if _impact_snapshot["data"] is None:
+        return impact()  # very first run: nothing to show yet
+    if time.time() - _impact_snapshot["at"] > IMPACT_FRESH_S:
+        threading.Thread(target=_refresh_impact, daemon=True).start()
+    return _impact_snapshot["data"]
 
 
 # ---- スマホのリモコン（/remote） ----
@@ -2156,7 +2188,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send(json.dumps(brief), "application/json")
         elif route == "/impact":
-            self._send(json.dumps(impact()), "application/json")
+            self._send(json.dumps(impact_fast()), "application/json")
         elif route == "/tv":
             # 部屋の向こうから眺める全画面ビュー。毎回ディスクから読むので、tv.html の手直しは再読み込みだけで反映される
             try:
@@ -2243,7 +2275,7 @@ def main():
         print(f"warning: no worker.py in {WORKER} (set FISHTEST_WORKER or --worker)")
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
     # 貢献カードの集計は起動直後だと Fishtest への問い合わせで 20 秒ほどかかるので、ページが開かれる前に裏で済ませておく
-    threading.Thread(target=impact, daemon=True).start()
+    threading.Thread(target=_refresh_impact, daemon=True).start()
     url = f"http://{args.host}:{args.port}"
     print(f"Fishtest worker monitor -> {url}  (Ctrl+C to stop)")
     print(f"Across-the-room view    -> {url}/tv")
