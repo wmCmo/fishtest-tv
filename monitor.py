@@ -1946,6 +1946,7 @@ a.more{display:block;text-align:center;color:var(--green-b);text-decoration:none
 </section>
 
 <div class="err" id="appErr" style="text-align:center"></div>
+<a class="more" href="/tv?phone">Watch the games →</a>
 <a class="more" href="/">Full monitor →</a>
 </div>
 </main>

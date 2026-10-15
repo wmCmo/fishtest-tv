@@ -127,6 +127,45 @@
   #impact.show { opacity: 1; }
   #impact .k { color: var(--muted); font-weight: 700; }
   #hint { position: fixed; left: 2vw; bottom: 0.6vh; font-size: 1.8vh; color: var(--dim); transition: opacity 1s; }
+
+  /* Phones: no commentary, so its badge goes */
+  body.phone #narr, body.phone #caption { display: none; }
+
+  /* Portrait (a phone held upright): board full width on top, cards below, the page scrolls.
+     Sizes switch from vh to vw because the screen is now tall and narrow. */
+  @media (orientation: portrait) {
+    html, body { height: auto; overflow-x: hidden; overflow-y: auto; }
+    #stage { position: relative; inset: auto; display: flex; flex-direction: column; gap: 4vw; padding: 24vw 4vw 3vw; }
+    .boardwrap { height: auto; width: 100%; gap: 2vw; }
+    #evalbar { width: 3vw; height: auto; align-self: stretch; border-radius: 1.5vw; }
+    .frame { height: auto; width: calc(100% - 5vw); padding: 2vw; border-radius: 3.5vw; }
+    #board { border-radius: 2vw; }
+    #banner { font-size: 7vw; padding: 2.5vw 6vw; }
+    #matchup { margin-top: 3vw; font-size: 3.6vw; white-space: normal; text-align: center; }
+    #moves { margin-top: 1.5vw; font-size: 3.6vw; min-height: 5vw; }
+    .right { gap: 3vw; }
+    .card { border-radius: 3.5vw; padding: 3vw 4vw; box-shadow: 0 1vw 0 var(--card-lip); }
+    .label { font-size: 2.8vw; }
+    #patch { font-size: 8vw; }
+    .sub { font-size: 3.4vw; margin-top: 1vw; }
+    .score .n { font-size: 9vw; }
+    .score .k { font-size: 2.6vw; margin-top: 1vw; }
+    .meter { height: 2.6vw; margin-top: 2vw; }
+    #headline { font-size: 4.2vw; }
+    #explain { font-size: 3.4vw; -webkit-line-clamp: 6; }
+    .chips { gap: 1.5vw; margin-top: 2vw; flex-wrap: wrap; }
+    .chip { font-size: 2.6vw; padding: 0.8vw 2vw; }
+    #progText { font-size: 3.4vw; margin-top: 1.5vw; }
+    #graphwrap { position: relative; left: auto; right: auto; bottom: auto; height: 18vw; margin: 0 4vw 8vw; }
+    #graphLabel { font-size: 2.4vw; }
+    /* Two lines at the top: the trophy, then the worker status */
+    #impact { position: absolute; top: 3vw; left: 4vw; right: 4vw; transform: none; overflow: hidden;
+      text-overflow: ellipsis; text-align: center; font-size: 3vw; padding: 1.5vw 3vw; }
+    #status { position: absolute; top: 13vw; left: 4vw; right: auto; gap: 1.5vw; font-size: 3.2vw; padding: 1.5vw 3vw;
+      max-width: 92vw; white-space: nowrap; overflow: hidden; }
+    #status .dot { width: 2.4vw; height: 2.4vw; flex: none; }
+    #hint { display: none; }
+  }
 </style>
 </head>
 <body>
@@ -324,7 +363,11 @@ const showMoves = (sans, upto, startFullmove, whiteFirst) => {
 
 // ---- 実況：monitor.py の /commentary が Ollama で台本（手数ごとのセリフ）を作り、Edge の音声で読み上げる ----
 const NARR_KEY = "tv-narrator"
-let narratorOn = (() => { try { return localStorage.getItem(NARR_KEY) !== "off" } catch { return true } })()
+// On a phone (touch screen, or /tv?phone) there is no commentary at all: no voice, no subtitles,
+// and no /commentary requests, so the PC's GPU isn't used for it.
+const PHONE = new URLSearchParams(location.search).has("phone") || matchMedia("(pointer: coarse)").matches
+if (PHONE) document.body.classList.add("phone")
+let narratorOn = !PHONE && (() => { try { return localStorage.getItem(NARR_KEY) !== "off" } catch { return true } })()
 const scripts = new Map()
 
 const requestScript = g => {
@@ -605,14 +648,15 @@ const loadRun = async run => {
 pickVoice()
 
 document.addEventListener("click", () => {
-  if (!document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {})
+  // On a phone a tap shouldn't jump into fullscreen (it hides the browser's back button)
+  if (!PHONE && !document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {})
   // クリックで音声が許可される。次のセリフから話し始める
   speechBlocked = false
   showNarr()
 })
 document.addEventListener("keydown", e => {
   if (e.key === "f") document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.()
-  if (e.key === "n") {
+  if (e.key === "n" && !PHONE) {
     narratorOn = !narratorOn
     try { localStorage.setItem(NARR_KEY, narratorOn ? "on" : "off") } catch {}
     if (!narratorOn) { speechSynthesis.cancel(); caption("") }
