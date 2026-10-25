@@ -712,6 +712,22 @@ code{color:var(--green-b);font-family:ui-monospace,Consolas,monospace;font-size:
 .trophy .tile b{display:block;font-size:20px;color:var(--text)}
 .trophy .tile .lbl{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:6px}
 .trophy .tile .lbl i{width:8px;height:8px;border-radius:50%;font-style:normal}
+.trophy .elo{margin-top:18px;padding:14px 14px 6px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+.trophy .ehead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.trophy .ehead .big{font-size:26px}
+.trophy .elegend{display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin:10px 0 4px;font-size:12.5px;color:var(--muted)}
+.trophy .etitle{color:var(--text);font-weight:600;margin-right:auto}
+.trophy .ekey{display:inline-flex;align-items:center;gap:6px}
+.trophy .ekey i{width:9px;height:9px;border-radius:50%;border:2px solid;box-sizing:border-box}
+.trophy .ewrap{position:relative}
+.trophy .ewrap svg{display:block;height:auto;max-width:100%}
+.trophy .tk{fill:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
+.trophy .ev{fill:var(--text);font-size:13px;font-weight:700}
+.trophy .etitle-svg{fill:var(--text);font-size:12.5px;font-weight:600}
+.trophy .etip{display:none;position:absolute;top:8px;z-index:3;max-width:300px;padding:9px 11px;border-radius:9px;
+  background:#0d1310;border:1px solid #2a4a36;font-size:12.5px;line-height:1.45;pointer-events:none;box-shadow:0 6px 20px rgba(0,0,0,.45)}
+.trophy .etip .tl{color:var(--muted);display:flex;align-items:center;gap:6px}
+.trophy .etip .tl i{width:8px;height:8px;border-radius:50%;flex:none}
 .trophy .merged{margin-top:14px;display:flex;flex-direction:column;gap:8px}
 .trophy .mrow{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;font-size:13.5px;padding:9px 12px;
   border-radius:10px;background:rgba(95,224,138,.07);border:1px solid #24402f}
@@ -803,7 +819,7 @@ const EXP={
  events:"A live tail of every API call your worker makes, newest first — the raw pulse of the worker talking to the server.",
  pgn:"<b>PGN</b> files are the game records fastchess writes to disk as each batch finishes, then uploads to the server. Newest first, with file size and age.",
  disk:"What the <code>testing/</code> folder is made of, by size. <b>NNUE nets</b> (the engine's neural-network eval files) and <b>opening books</b> dominate. <b>Can I tell which file 'passed'?</b> No — the <code>stockfish-&lt;sha&gt;.exe</code> files are just candidate builds; whether a patch helps is an <b>SPRT verdict decided server-side</b> across all workers, never stored locally. <b>Safe to delete?</b> Yes — anything not referenced by the current task is a leftover the worker re-downloads on demand. Green-outlined files are in use (keep); the rest are reclaimable. <span style='color:var(--amber)'>Only delete while the worker is idle — a running task holds its files open.</span>",
- trophy:"Every test your worker played games for since your local record starts, grouped by what happened to it. <b>In Stockfish</b> = the patch's branch was later merged into Stockfish master (matched by commit message, checked once a day). <b>Passed, not merged</b> = it passed SPRT but no matching master commit yet (often an STC pass waiting for LTC, or still in review). <b>Still undecided</b> = your worker already played its share of games for these tests, but the tests themselves are still running on Fishtest with other people's workers (your PC plays one batch at a time). <b>Not merged</b> = it failed or was stopped. <b>CPU-hours</b> = games × the time control's expected game length × threads, i.e. the compute your machine donated."
+ trophy:"Every test your worker played games for since your local record starts, grouped by what happened to it. <b>In Stockfish</b> = the patch's branch was later merged into Stockfish master (matched by commit message, checked once a day). <b>Passed, not merged</b> = it passed SPRT but no matching master commit yet (often an STC pass waiting for LTC, or still in review). <b>Still undecided</b> = your worker already played its share of games for these tests, but the tests themselves are still running on Fishtest with other people's workers (your PC plays one batch at a time). <b>Not merged</b> = it failed or was stopped. <b>CPU-hours</b> = games × the time control's expected game length × threads, i.e. the compute your machine donated. <b>Elo chart</b> = how much stronger the merged patches made Stockfish, each measured by Fishtest's estimate from its LTC test (or its only test). It's in <b>normalized Elo</b>, Fishtest's own unit, and the estimate is corrected for SPRT stopping early. The bars are 95% ranges: a single patch is only measured to about ±1, so the running total is the meaningful number. Patches that only had to prove they're <b>not weaker</b> (simplifications, speed-ups, cheaper nets) sit near 0 on purpose."
 };
 const TIP={
  tc:"Time control: base seconds + increment added per move.",
@@ -1010,23 +1026,98 @@ async function loadTrophy(){
       <b>${big}</b>
       <div class="sub">${extra}${num(T[k].games)} games · ${num(Math.round(T[k].cpu_hours))} CPU-h</div></div>`;
   }).join("");
+  const pe=Object.fromEntries((d.patch_elo||[]).map(p=>[p.sha,p]));
   const merged=[...patches.values()].sort((a,b)=>(b.commit.date||"").localeCompare(a.commit.date||"")).map(p=>{
     const c=p.commit,link=c.sha?`https://github.com/official-stockfish/Stockfish/commit/${c.sha}`:null;
+    const e=pe[c.sha],eloTxt=e?` · <b>${fmtE(e.elo)}</b> nElo (${fmtE(e.lo)} to ${fmtE(e.hi)})`:"";
     const kinds=p.tests.map(t=>tcName(t.tc)).join(" + ");
     return `<div class="mrow">🏆 <code>${esc(p.branch)}</code>
       ${link?`<a href="${escAttr(link)}" target="_blank" rel="noopener">“${esc(c.subject||"commit")}”</a>`:""}
-      <span class="sub">${esc(c.date||"")}${c.sha?" · "+esc(c.sha.slice(0,7)):""} · by ${esc(p.author||"?")} · you played ${esc(kinds)}: ${num(p.games)} games, ${num(Math.round(p.hours))} CPU-h</span></div>`;
+      <span class="sub">${esc(c.date||"")}${c.sha?" · "+esc(c.sha.slice(0,7)):""} · by ${esc(p.author||"?")} · you played ${esc(kinds)}: ${num(p.games)} games, ${num(Math.round(p.hours))} CPU-h${eloTxt}</span></div>`;
   }).join("");
   const el=document.getElementById("trophy"),wasOpen=document.getElementById("exp-trophy")?.classList.contains("open");
   el.innerHTML=`<h2>Your contribution${since?` · since ${esc(since)}`:""}<button class="q" data-k="trophy">?</button></h2>
     <div class="exp${wasOpen?" open":""}" id="exp-trophy">${EXP.trophy}</div>
     <div class="head"><span class="cup">🏆</span>${headline}</div>
     <div class="tiles">${tiles}</div>
+    ${(d.patch_elo||[]).length?`<div class="elo" id="eloChart"></div>`:""}
     ${merged?`<div class="merged">${merged}</div>`:""}
     <div class="sub" style="margin-top:12px">Total: ${tests} tests · ${num(games)} games · ${num(Math.round(hours))} CPU-hours donated</div>`;
   el.style.display="block";
+  ELO=d.patch_elo||[];drawElo();
 }
 loadTrophy();setInterval(loadTrophy,10*60*1000);
+
+/* ---- Elo chart: what the merged patches you helped test added, per patch and as a running total ----
+   Each patch is measured by Fishtest's median-unbiased estimate from its LTC test (normalized Elo,
+   95% interval). The running total's interval adds the patches' uncertainties in quadrature. */
+const ELO_COLOR={gainer:"#34a85e",nonreg:"#5288d0"};  // validated pair on the card surface (dark)
+const ELO_KIND={gainer:"Had to prove it's stronger",nonreg:"Had to prove it's not weaker"};
+let ELO=[];
+function niceTicks(lo,hi,n){
+  const span=hi-lo||1,step0=span/n,mag=10**Math.floor(Math.log10(step0));
+  const step=[1,2,2.5,5,10].map(s=>s*mag).find(s=>s>=step0)||10*mag;
+  const out=[];for(let v=Math.ceil(lo/step)*step;v<=hi+1e-9;v+=step)out.push(+v.toFixed(6));return out;
+}
+const fmtE=v=>(v>0?"+":v<0?"−":"")+Math.abs(v).toFixed(1);
+function drawElo(){
+  const box=document.getElementById("eloChart");if(!box||!ELO.length)return;
+  const W=Math.max(300,box.clientWidth),pad={l:44,r:56,t:10,b:8},n=ELO.length;
+  const H1=170,H2=150,GAP=46,AX=26,H=H1+GAP+H2+AX;
+  const x=i=>pad.l+(n===1?(W-pad.l-pad.r)/2:i*(W-pad.l-pad.r)/(n-1));
+  // running total and its 95% band
+  let cum=0,v2=0;const run=ELO.map(p=>{cum+=p.elo;const s=(p.hi-p.lo)/(2*1.96);v2+=s*s;const h=1.96*Math.sqrt(v2);return{c:cum,lo:cum-h,hi:cum+h}});
+  const c0=Math.min(0,...run.map(r=>r.lo)),c1=Math.max(...run.map(r=>r.hi));
+  const t1=niceTicks(c0,c1,4),y1lo=Math.min(c0,t1[0]),y1hi=Math.max(c1,t1[t1.length-1]);
+  const y1=v=>pad.t+H1-(v-y1lo)/(y1hi-y1lo)*H1;
+  const e0=Math.min(0,...ELO.map(p=>p.lo)),e1=Math.max(0,...ELO.map(p=>p.hi));
+  const t2=niceTicks(e0,e1,4),y2lo=Math.min(e0,t2[0]),y2hi=Math.max(e1,t2[t2.length-1]),top2=pad.t+H1+GAP;
+  const y2=v=>top2+H2-(v-y2lo)/(y2hi-y2lo)*H2;
+  const grid=(ticks,y,x0,x1)=>ticks.map(t=>`<line x1="${x0}" x2="${x1}" y1="${y(t)}" y2="${y(t)}" stroke="${t===0?"#3a4a41":"#1d2a23"}" stroke-width="1"/>
+      <text x="${x0-8}" y="${y(t)+4}" text-anchor="end" class="tk">${fmtE(t)}</text>`).join("");
+  const band=`M${run.map((r,i)=>`${x(i)},${y1(r.hi)}`).join(" L")} L${run.map((r,i)=>`${x(i)},${y1(r.lo)}`).reverse().join(" L")} Z`;
+  const line=run.map((r,i)=>`${i?"L":"M"}${x(i)},${y1(r.c)}`).join(" ");
+  const last=run[n-1];
+  // date ticks: first patch of each date, skipped when closer than 64px to the previous label
+  let lastX=-1e9;const dates=ELO.map((p,i)=>{if(i&&p.date===ELO[i-1].date)return"";if(x(i)-lastX<64)return"";lastX=x(i);
+    const d=new Date(p.date+"T00:00:00");return`<text x="${x(i)}" y="${H-6}" text-anchor="middle" class="tk">${d.toLocaleDateString("en-US",{month:"short",day:"numeric"})}</text>`}).join("");
+  const marks=ELO.map((p,i)=>{const col=ELO_COLOR[p.kind],cx=x(i);
+    return `<line x1="${cx}" x2="${cx}" y1="${y2(p.lo)}" y2="${y2(p.hi)}" stroke="${col}" stroke-width="2" stroke-linecap="round" opacity=".55"/>
+      <circle cx="${cx}" cy="${y2(p.elo)}" r="5" fill="${p.kind==="gainer"?col:"var(--panel)"}" stroke="${p.kind==="gainer"?"var(--panel)":col}" stroke-width="${p.kind==="gainer"?2:2.5}"/>`}).join("");
+  const hits=ELO.map((p,i)=>{const w=Math.max(14,(W-pad.l-pad.r)/Math.max(1,n-1));
+    return `<rect class="hit" data-i="${i}" x="${x(i)-w/2}" y="0" width="${w}" height="${H}" fill="transparent"/>`}).join("");
+  box.innerHTML=`<div class="ehead"><span class="big g">${fmtE(last.c)}</span><span class="sub">normalized Elo added by the ${n} patch${n===1?"":"es"} you helped get into Stockfish
+      · 95% range ${fmtE(last.lo)} to ${fmtE(last.hi)}</span></div>
+    <div class="elegend"><span class="etitle">Running total</span>
+      <span class="ekey"><i style="background:${ELO_COLOR.gainer};border-color:${ELO_COLOR.gainer}"></i>${ELO_KIND.gainer}</span>
+      <span class="ekey"><i style="background:transparent;border-color:${ELO_COLOR.nonreg}"></i>${ELO_KIND.nonreg}</span></div>
+    <div class="ewrap"><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Running total of Elo added, and each patch's Elo with its 95% range">
+      ${grid(t1,y1,pad.l,W-pad.r)}
+      <path d="${band}" fill="#34a85e" opacity=".12"/>
+      <path d="${line}" fill="none" stroke="#34a85e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      <circle cx="${x(n-1)}" cy="${y1(last.c)}" r="5" fill="#34a85e" stroke="var(--panel)" stroke-width="2"/>
+      <text x="${x(n-1)+10}" y="${y1(last.c)+4}" class="ev">${fmtE(last.c)}</text>
+      <text x="${pad.l}" y="${top2-14}" class="etitle-svg">Each patch, with its 95% range</text>
+      ${grid(t2,y2,pad.l,W-pad.r)}
+      ${marks}${dates}
+      <line id="eloCross" x1="0" x2="0" y1="${pad.t}" y2="${top2+H2}" stroke="#7d8f85" stroke-width="1" opacity="0"/>
+      ${hits}</svg><div class="etip" id="eloTip"></div></div>`;
+  const tip=box.querySelector("#eloTip"),cross=box.querySelector("#eloCross");
+  box.querySelectorAll(".hit").forEach(r=>{
+    const show=()=>{const i=+r.dataset.i,p=ELO[i],rr=run[i],cx=x(i);
+      cross.setAttribute("x1",cx);cross.setAttribute("x2",cx);cross.setAttribute("opacity",".5");
+      tip.innerHTML=`<b>${esc(p.branch)}</b><div>${esc(p.subject)}</div>
+        <div class="tl"><i style="background:${ELO_COLOR[p.kind]}"></i>${fmtE(p.elo)} nElo (95%: ${fmtE(p.lo)} to ${fmtE(p.hi)}) · ${esc(p.tc==="60+0.6"?"LTC":p.tc==="10+0.1"?"STC":p.tc)}</div>
+        <div class="tl">${ELO_KIND[p.kind]}</div>
+        <div class="tl">Running total after it: ${fmtE(rr.c)}</div>
+        <div class="tl">${esc(p.date)} · you played ${num(p.my_games)} games</div>`;
+      tip.style.display="block";
+      const left=Math.min(Math.max(cx-tip.offsetWidth/2,0),W-tip.offsetWidth);tip.style.left=left+"px";tip.style.top=(top2-10-tip.offsetHeight>0?8:top2)+"px"};
+    r.addEventListener("mouseenter",show);r.addEventListener("click",show);
+    r.addEventListener("mouseleave",()=>{tip.style.display="none";cross.setAttribute("opacity","0")});
+  });
+}
+let eloResize;addEventListener("resize",()=>{clearTimeout(eloResize);eloResize=setTimeout(drawElo,150)});
 
 /* ---- Game Viewer: built once, holds its own state, never reset by polling ---- */
 const V={games:[],gi:0,ply:0,timer:null};
@@ -1654,8 +1745,11 @@ def merged_runs():
         if len(fields) < 4:
             continue
         sha, date, subject, body = fields
-        for run in re.findall(r"tests/view/([0-9a-f]{24})", body):
-            runs.setdefault(run, {"sha": sha, "date": date, "subject": subject})
+        ids = list(dict.fromkeys(re.findall(r"tests/view/([0-9a-f]{24})", body)))
+        # Every test linked in the commit message, so the Elo chart can pick the one that measured it
+        commit = {"sha": sha, "date": date, "subject": subject, "runs": ids}
+        for run in ids:
+            runs.setdefault(run, commit)
     _merged.update(at=time.time(), runs=runs)
     return runs
 
@@ -1674,6 +1768,71 @@ def run_status(run):
     if keep["finished"]:
         _write_json(path, keep)
     return keep
+
+
+def run_elo(run):
+    """Fishtest's Elo estimate for a finished SPRT test (/api/get_elo): median-unbiased, i.e. corrected
+    for SPRT stopping early, with a 95% interval, in the test's own Elo model (normalized for current
+    tests). Finished tests never change, so the answer is kept on disk."""
+    path = os.path.join(CACHE, "elo", f"{run}.json")
+    cached = _read_json(path, None)
+    if cached is not None:
+        return cached
+    try:
+        with urllib.request.urlopen(f"{FISHTEST}/api/get_elo/{run}", timeout=30) as r:
+            d = json.load(r)
+    except (OSError, ValueError):
+        return None
+    args, est = d.get("args") or {}, d.get("elo") or {}
+    sprt = args.get("sprt") or {}
+    if not est or "elo" not in est:
+        return None  # not an SPRT test (e.g. SPSA tuning or fixed games): no estimate
+    out = {
+        "run": run, "tc": args.get("tc"), "threads": int(args.get("threads") or 1),
+        "elo": round(est["elo"], 2), "lo": round(est["ci"][0], 2), "hi": round(est["ci"][1], 2),
+        "elo0": sprt.get("elo0"), "elo1": sprt.get("elo1"), "model": sprt.get("elo_model"),
+        "finished": bool(d.get("finished")),
+    }
+    if out["finished"]:
+        _write_json(path, out)
+    return out
+
+
+def _tc_base(tc):
+    try:
+        return float(str(tc).split("+")[0])
+    except ValueError:
+        return 0.0
+
+
+def patch_elos(tests):
+    """One entry per merged patch this PC helped test, oldest first, measured by the commit's
+    single-threaded LTC test (or its longest test if it has no LTC)."""
+    patches = {}
+    for t in tests:
+        c = t.get("commit")
+        if not c:
+            continue
+        p = patches.setdefault(c["sha"], {"sha": c["sha"], "date": c["date"], "subject": c["subject"],
+                                          "branch": t["branch"], "author": t["author"], "runs": c.get("runs") or [],
+                                          "my_games": 0, "my_tcs": []})
+        p["my_games"] += t["games"]
+        p["my_tcs"].append(t["tc"])
+    out = []
+    for p in patches.values():
+        elos = [e for e in (run_elo(r) for r in p.pop("runs")) if e]
+        single = [e for e in elos if e["threads"] == 1] or elos
+        if not single:
+            continue
+        # Prefer the standard LTC (60+0.6) so patches are compared on the same footing; a commit can also
+        # link a VLTC test (e.g. 360+3.6), which measures something else. Without an LTC, take the longest.
+        ltc = [e for e in single if e["tc"] == "60+0.6"]
+        best = ltc[0] if ltc else max(single, key=lambda e: _tc_base(e["tc"]))
+        out.append({**p, "measured_by": best["run"], "tc": best["tc"], "elo": best["elo"], "lo": best["lo"],
+                    "hi": best["hi"], "model": best["model"], "my_tcs": sorted(set(p["my_tcs"]), key=_tc_base),
+                    "kind": "gainer" if (best["elo0"] or 0) >= 0 else "nonreg"})
+    out.sort(key=lambda p: p["date"])
+    return out
 
 
 def impact():
@@ -1719,6 +1878,7 @@ def impact():
             "since": min((t["first_seen"] for t in tests if t["first_seen"]), default=None),
             "totals": totals,
             "merged_patches": len(merged_patches),
+            "patch_elo": patch_elos(tests),
             "tests": tests,
         }
         _impact_snapshot.update(at=time.time(), data=result)
