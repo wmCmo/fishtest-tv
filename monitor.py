@@ -819,7 +819,7 @@ const EXP={
  events:"A live tail of every API call your worker makes, newest first — the raw pulse of the worker talking to the server.",
  pgn:"<b>PGN</b> files are the game records fastchess writes to disk as each batch finishes, then uploads to the server. Newest first, with file size and age.",
  disk:"What the <code>testing/</code> folder is made of, by size. <b>NNUE nets</b> (the engine's neural-network eval files) and <b>opening books</b> dominate. <b>Can I tell which file 'passed'?</b> No — the <code>stockfish-&lt;sha&gt;.exe</code> files are just candidate builds; whether a patch helps is an <b>SPRT verdict decided server-side</b> across all workers, never stored locally. <b>Safe to delete?</b> Yes — anything not referenced by the current task is a leftover the worker re-downloads on demand. Green-outlined files are in use (keep); the rest are reclaimable. <span style='color:var(--amber)'>Only delete while the worker is idle — a running task holds its files open.</span>",
- trophy:"Every test your worker played games for since your local record starts, grouped by what happened to it. <b>In Stockfish</b> = the patch's branch was later merged into Stockfish master (matched by commit message, checked once a day). <b>Passed, not merged</b> = it passed SPRT but no matching master commit yet (often an STC pass waiting for LTC, or still in review). <b>Still undecided</b> = your worker already played its share of games for these tests, but the tests themselves are still running on Fishtest with other people's workers (your PC plays one batch at a time). <b>Not merged</b> = it failed or was stopped. <b>CPU-hours</b> = games × the time control's expected game length × threads, i.e. the compute your machine donated. <b>Elo chart</b> = how much stronger the merged patches made Stockfish, each measured by Fishtest's estimate from its LTC test (or its only test). It's in <b>normalized Elo</b>, Fishtest's own unit, and the estimate is corrected for SPRT stopping early. The bars are 95% ranges: a single patch is only measured to about ±1, so the running total is the meaningful number. Patches that only had to prove they're <b>not weaker</b> (simplifications, speed-ups, cheaper nets) sit near 0 on purpose."
+ trophy:"Every test your worker played games for since your local record starts, grouped by what happened to it. <b>In Stockfish</b> = the patch's branch was later merged into Stockfish master (matched by commit message, checked once a day). <b>Passed, not merged</b> = it passed SPRT but no matching master commit yet: a speed-up or cleanup in review, an LTC pass waiting for the next merge batch, a research run, or a patch its author dropped. <b>Still undecided</b> = the test, or the longer-TC test that followed its pass (STC → LTC), is still running on Fishtest with other people's workers (your PC plays one batch at a time). <b>Not merged</b> = it failed or was stopped, or it passed and then failed a longer TC (checked on Fishtest every 30 min). <b>CPU-hours</b> = games × the time control's expected game length × threads, i.e. the compute your machine donated. <b>Elo chart</b> = how much stronger the merged patches made Stockfish, each measured by Fishtest's estimate from its LTC test (or its only test). It's in <b>normalized Elo</b>, Fishtest's own unit, and the estimate is corrected for SPRT stopping early. The bars are 95% ranges: a single patch is only measured to about ±1, so the running total is the meaningful number. Patches that only had to prove they're <b>not weaker</b> (simplifications, speed-ups, cheaper nets) sit near 0 on purpose."
 };
 const TIP={
  tc:"Time control: base seconds + increment added per move.",
@@ -1020,7 +1020,10 @@ async function loadTrophy(){
   const tcName=tc=>tc==="10+0.1"?"STC":tc==="60+0.6"?"LTC":tc;
   const tiles=OUTCOMES.filter(([k])=>T[k]).map(([k,label,color])=>{
     const big=k==="merged"?`${patches.size} patch${patches.size===1?"":"es"}`:`${T[k].tests} test${T[k].tests===1?"":"s"}`;
-    const extra=k==="merged"&&T[k].tests!==patches.size?`${T[k].tests} tests · `:"";
+    const after=s=>(d.tests||[]).filter(t=>t.outcome===k&&t.next?.state===s).length;
+    const extra=k==="merged"&&T[k].tests!==patches.size?`${T[k].tests} tests · `
+      :k==="not merged"&&after("failed")?`${after("failed")} passed, then failed a longer TC · `
+      :k==="running"&&after("running")?`${after("running")} passed, now in a longer TC · `:"";
     return `<div class="tile">
       <div class="lbl"><i style="background:${color}"></i>${label}</div>
       <b>${big}</b>
@@ -1835,6 +1838,79 @@ def patch_elos(tests):
     return out
 
 
+# What happened after a test passed: a gainer has to pass STC and then LTC, so an STC pass alone
+# says little. The answer is the same author's later SPRT on the same branch at a longer TC.
+FOLLOW_UPS = os.path.join(CACHE, "follow-ups.json")
+FOLLOW_UP_EVERY_S = 1800
+FOLLOW_UP_GIVE_UP_DAYS = 21  # no longer test after 3 weeks: the patch was dropped, stop asking
+_follow_at = {"at": 0.0}
+
+
+def _ft_time(s):
+    return str(s or "").replace("T", " ")[:19]
+
+
+def _sprt_state(r):
+    if not r.get("finished"):
+        return "running"
+    return {"accepted": "passed", "rejected": "failed"}.get(((r.get("args") or {}).get("sprt") or {}).get("state"))
+
+
+def _author_runs(author, since, active):
+    """The author's runs started at or after `since`: finished ones paged back from newest, plus running ones."""
+    out = [r for r in active.values() if (r.get("args") or {}).get("username") == author]
+    for page in range(1, 21):
+        url = f"{FISHTEST}/api/finished_runs?username={urllib.parse.quote(author)}&page={page}"
+        with urllib.request.urlopen(url, timeout=30) as r:
+            batch = list(json.load(r).values())
+        out += batch
+        if not batch or min(_ft_time(b.get("start_time")) for b in batch) < since:
+            break
+    return out
+
+
+def follow_ups(tests):
+    """Adds t["next"] = {"state", "tc", "run"} to tests that passed but aren't merged: the longer-TC test
+    that came after (passed / running / failed), or state None if there is none. Passed and failed never
+    change and are kept on disk; the rest are rechecked every 30 minutes."""
+    cache = _read_json(FOLLOW_UPS, {})
+    passed = [t for t in tests if t["outcome"] == "passed"]
+    todo = [t for t in passed if (cache.get(t["run"]) or {}).get("final") is not True]
+    if todo and time.time() - _follow_at["at"] > FOLLOW_UP_EVERY_S:
+        try:
+            with urllib.request.urlopen(f"{FISHTEST}/api/active_runs", timeout=60) as r:
+                active = json.load(r)
+            by_author = {}
+            for t in todo:
+                by_author.setdefault(t["author"], []).append(t)
+            for author, mine in by_author.items():
+                starts = {t["run"]: _ft_time(run_status(t["run"])["start_time"]) for t in mine}
+                runs = _author_runs(author, min(starts.values()), active)
+                for t in mine:
+                    later = [r for r in runs
+                             if r["_id"] != t["run"] and _ft_time(r.get("start_time")) >= starts[t["run"]]
+                             and _tc_base(r["args"]["tc"]) > _tc_base(t["tc"])
+                             and re.fullmatch(re.escape(t["branch"]) + r"([-_].*)?", r["args"]["new_tag"])]
+                    found = None
+                    for want in ("passed", "running", "failed"):
+                        found = next((r for r in later if _sprt_state(r) == want), None)
+                        if found:
+                            break
+                    age = (datetime.now(timezone.utc)
+                           - datetime.fromisoformat(starts[t["run"]]).replace(tzinfo=timezone.utc)).days
+                    state = _sprt_state(found) if found else None
+                    cache[t["run"]] = {"state": state, "tc": found["args"]["tc"] if found else None,
+                                       "run": found["_id"] if found else None,
+                                       "final": state in ("passed", "failed") or (not found and age > FOLLOW_UP_GIVE_UP_DAYS)}
+            _write_json(FOLLOW_UPS, cache)
+            _follow_at["at"] = time.time()
+        except (OSError, ValueError, KeyError) as e:
+            print(f"follow-ups: {e}")  # keep what the cache already knows
+    for t in passed:
+        if t["run"] in cache:
+            t["next"] = {k: cache[t["run"]][k] for k in ("state", "tc", "run")}
+
+
 def impact():
     """担当したテストを「取り込まれた / 合格して取り込み待ち / 不合格 / 実行中」に分け、対局数と CPU 時間を合計する。"""
     with _impact_lock:
@@ -1866,6 +1942,14 @@ def impact():
                 "first_seen": entry.get("first_seen"), "commit": merged.get(run),
             })
         tests.sort(key=lambda x: x["first_seen"] or "", reverse=True)
+        # An STC pass whose LTC failed didn't make it; one whose LTC is still running is undecided
+        follow_ups(tests)
+        for t in tests:
+            state = (t.get("next") or {}).get("state")
+            if state == "failed":
+                t["outcome"] = "not merged"
+            elif state == "running":
+                t["outcome"] = "running"
         totals = {}
         for t in tests:
             agg = totals.setdefault(t["outcome"], {"tests": 0, "games": 0, "cpu_hours": 0.0})
