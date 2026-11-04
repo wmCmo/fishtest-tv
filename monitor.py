@@ -732,6 +732,9 @@ code{color:var(--green-b);font-family:ui-monospace,Consolas,monospace;font-size:
 .trophy .mrow{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;font-size:13.5px;padding:9px 12px;
   border-radius:10px;background:rgba(95,224,138,.07);border:1px solid #24402f}
 .trophy .mrow code{color:var(--green-b)}
+.trophy .wrow{background:rgba(110,160,255,.07);border-color:#28385a}
+.trophy .wrow code{color:var(--blue)}
+.trophy .wrow .nopr{color:var(--amber);font-weight:600}
 /* スマホ：余白を詰め、ヘッダーは固定せず、右上の情報は下の行に回す */
 @media (max-width:640px){
   header{position:static;padding:14px 16px}
@@ -819,7 +822,7 @@ const EXP={
  events:"A live tail of every API call your worker makes, newest first — the raw pulse of the worker talking to the server.",
  pgn:"<b>PGN</b> files are the game records fastchess writes to disk as each batch finishes, then uploads to the server. Newest first, with file size and age.",
  disk:"What the <code>testing/</code> folder is made of, by size. <b>NNUE nets</b> (the engine's neural-network eval files) and <b>opening books</b> dominate. <b>Can I tell which file 'passed'?</b> No — the <code>stockfish-&lt;sha&gt;.exe</code> files are just candidate builds; whether a patch helps is an <b>SPRT verdict decided server-side</b> across all workers, never stored locally. <b>Safe to delete?</b> Yes — anything not referenced by the current task is a leftover the worker re-downloads on demand. Green-outlined files are in use (keep); the rest are reclaimable. <span style='color:var(--amber)'>Only delete while the worker is idle — a running task holds its files open.</span>",
- trophy:"Every test your worker played games for since your local record starts, grouped by what happened to it. <b>In Stockfish</b> = the patch's branch was later merged into Stockfish master (matched by commit message, checked once a day). <b>Passed, not merged</b> = it passed SPRT but no matching master commit yet: a speed-up or cleanup in review, an LTC pass waiting for the next merge batch, a research run, or a patch its author dropped. <b>Still undecided</b> = the test, or the longer-TC test that followed its pass (STC → LTC), is still running on Fishtest with other people's workers (your PC plays one batch at a time). <b>Not merged</b> = it failed or was stopped, or it passed and then failed a longer TC (checked on Fishtest every 30 min). <b>CPU-hours</b> = games × the time control's expected game length × threads, i.e. the compute your machine donated. <b>Elo chart</b> = how much stronger the merged patches made Stockfish, each measured by Fishtest's estimate from its LTC test (or its only test). It's in <b>normalized Elo</b>, Fishtest's own unit, and the estimate is corrected for SPRT stopping early. The bars are 95% ranges: a single patch is only measured to about ±1, so the running total is the meaningful number. Patches that only had to prove they're <b>not weaker</b> (simplifications, speed-ups, cheaper nets) sit near 0 on purpose."
+ trophy:"Every test your worker played games for since your local record starts, grouped by what happened to it. <b>In Stockfish</b> = the patch's branch was later merged into Stockfish master (matched by commit message, checked once a day). <b>Waiting to merge</b> = patches that passed the long round (LTC), or have an open pull request on GitHub (speed-ups and cleanups only need the short round), but aren't in master yet. Each row says whether there is a PR: “no PR” usually means its author never sent it in. Checked every 30 min. <b>Other passes</b> = everything else that went green: first-round (STC) passes with no LTC and no PR, research runs, and progression tests. <b>Still undecided</b> = the test, or the longer-TC test that followed its pass (STC → LTC), is still running on Fishtest with other people's workers (your PC plays one batch at a time). <b>Not merged</b> = it failed or was stopped, or it passed and then failed a longer TC (checked on Fishtest every 30 min). <b>CPU-hours</b> = games × the time control's expected game length × threads, i.e. the compute your machine donated. <b>Elo chart</b> = how much stronger the merged patches made Stockfish, each measured by Fishtest's estimate from its LTC test (or its only test). It's in <b>normalized Elo</b>, Fishtest's own unit, and the estimate is corrected for SPRT stopping early. The bars are 95% ranges: a single patch is only measured to about ±1, so the running total is the meaningful number. Patches that only had to prove they're <b>not weaker</b> (simplifications, speed-ups, cheaper nets) sit near 0 on purpose."
 };
 const TIP={
  tc:"Time control: base seconds + increment added per move.",
@@ -993,8 +996,8 @@ document.addEventListener("click",e=>{
 tick();setInterval(tick,2000);
 
 /* ---- Trophy: this PC's contribution (/impact, every 10 min — same data as the TV's trophy) ---- */
-const OUTCOMES=[["merged","In Stockfish","var(--green-b)"],["passed","Passed, not merged","var(--blue)"],
-  ["running","Still undecided","var(--amber)"],["not merged","Not merged","#55655d"]];
+const OUTCOMES=[["merged","In Stockfish","var(--green-b)"],["waiting","Waiting to merge","var(--blue)"],
+  ["running","Still undecided","var(--amber)"],["passed","Other passes","#4a6888"],["not merged","Not merged","#55655d"]];
 const num=n=>Number(n||0).toLocaleString("en-US");
 async function loadTrophy(){
   // 初回の集計中は「集計中」と出しておく（何も出ないと消えたように見える）
@@ -1018,12 +1021,22 @@ async function loadTrophy(){
     p.tests.push(t);p.games+=t.games;p.hours+=t.cpu_hours;patches.set(key,p);
   }
   const tcName=tc=>tc==="10+0.1"?"STC":tc==="60+0.6"?"LTC":tc;
+  // Waiting to merge: one row per patch (its PR, or its branch when nobody opened one)
+  const wmap=new Map();
+  for(const t of (d.tests||[]).filter(t=>t.outcome==="waiting")){
+    const key=t.pr?"pr"+t.pr.number:"br"+t.author+"/"+t.branch;
+    const w=wmap.get(key)||{pr:t.pr,branch:t.branch,author:t.author,tests:[],games:0,hours:0};
+    w.tests.push(t);w.games+=t.games;w.hours+=t.cpu_hours;wmap.set(key,w);
+  }
+  const waiting=[...wmap.values()].sort((a,b)=>(a.pr?.opened||"9").localeCompare(b.pr?.opened||"9"));
   const tiles=OUTCOMES.filter(([k])=>T[k]).map(([k,label,color])=>{
-    const big=k==="merged"?`${patches.size} patch${patches.size===1?"":"es"}`:`${T[k].tests} test${T[k].tests===1?"":"s"}`;
+    const big=k==="merged"?`${patches.size} patch${patches.size===1?"":"es"}`
+      :k==="waiting"?`${waiting.length} patch${waiting.length===1?"":"es"}`:`${T[k].tests} test${T[k].tests===1?"":"s"}`;
     const after=s=>(d.tests||[]).filter(t=>t.outcome===k&&t.next?.state===s).length;
     const extra=k==="merged"&&T[k].tests!==patches.size?`${T[k].tests} tests · `
       :k==="not merged"&&after("failed")?`${after("failed")} passed, then failed a longer TC · `
-      :k==="running"&&after("running")?`${after("running")} passed, now in a longer TC · `:"";
+      :k==="running"&&after("running")?`${after("running")} passed, now in a longer TC · `
+      :k==="waiting"?`${waiting.filter(w=>w.pr).length} with a PR · ${waiting.filter(w=>!w.pr).length} without · `:"";
     return `<div class="tile">
       <div class="lbl"><i style="background:${color}"></i>${label}</div>
       <b>${big}</b>
@@ -1038,11 +1051,19 @@ async function loadTrophy(){
       ${link?`<a href="${escAttr(link)}" target="_blank" rel="noopener">“${esc(c.subject||"commit")}”</a>`:""}
       <span class="sub">${esc(c.date||"")}${c.sha?" · "+esc(c.sha.slice(0,7)):""} · by ${esc(p.author||"?")} · you played ${esc(kinds)}: ${num(p.games)} games, ${num(Math.round(p.hours))} CPU-h${eloTxt}</span></div>`;
   }).join("");
+  const wrows=waiting.map(w=>{
+    const kinds=w.tests.map(t=>tcName(t.tc)).join(" + ");
+    const pr=w.pr?`<a href="${escAttr(w.pr.url)}" target="_blank" rel="noopener">PR #${w.pr.number} “${esc(w.pr.title)}”</a>
+      <span class="sub">opened ${esc(w.pr.opened)}</span>`:`<span class="nopr">no PR</span>`;
+    return `<div class="mrow wrow">⏳ <code>${esc(w.branch)}</code> ${pr}
+      <span class="sub">by ${esc(w.author||"?")} · you played ${esc(kinds)}: ${num(w.games)} games, ${num(Math.round(w.hours))} CPU-h</span></div>`;
+  }).join("");
   const el=document.getElementById("trophy"),wasOpen=document.getElementById("exp-trophy")?.classList.contains("open");
   el.innerHTML=`<h2>Your contribution${since?` · since ${esc(since)}`:""}<button class="q" data-k="trophy">?</button></h2>
     <div class="exp${wasOpen?" open":""}" id="exp-trophy">${EXP.trophy}</div>
     <div class="head"><span class="cup">🏆</span>${headline}</div>
     <div class="tiles">${tiles}</div>
+    ${wrows?`<div class="merged">${wrows}</div>`:""}
     ${(d.patch_elo||[]).length?`<div class="elo" id="eloChart"></div>`:""}
     ${merged?`<div class="merged">${merged}</div>`:""}
     <div class="sub" style="margin-top:12px">Total: ${tests} tests · ${num(games)} games · ${num(Math.round(hours))} CPU-hours donated</div>`;
@@ -1911,6 +1932,43 @@ def follow_ups(tests):
             t["next"] = {k: cache[t["run"]][k] for k in ("state", "tc", "run")}
 
 
+# Open Stockfish pull requests, to tell a pass that is waiting for the maintainers from one nobody sent in.
+# A PR's description links its Fishtest tests; the branch name is the fallback. One GitHub request
+# (unauthenticated, 60 an hour allowed) every 30 minutes.
+PR_EVERY_S = 1800
+LONG_TCS = {"60+0.6", "180+1.8", "240+2.4", "360+3.6"}  # Fishtest's LTC and VLTC; 100+1 etc. are research runs
+_prs = {"at": 0.0, "by_run": {}, "by_branch": {}}
+
+
+def open_prs():
+    if time.time() - _prs["at"] < PR_EVERY_S:
+        return _prs
+    try:
+        req = urllib.request.Request("https://api.github.com/repos/official-stockfish/Stockfish/pulls?state=open&per_page=100",
+                                     headers={"User-Agent": "fishtest-tv", "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            pulls = json.load(r)
+    except (OSError, ValueError) as e:
+        print(f"open PRs: {e}")
+        return _prs  # keep the last answer
+    by_run, by_branch = {}, {}
+    for p in pulls:
+        pr = {"number": p["number"], "title": p["title"], "url": p["html_url"], "opened": (p.get("created_at") or "")[:10]}
+        for run in re.findall(r"tests/view/([0-9a-f]{24})", p.get("body") or ""):
+            by_run.setdefault(run, pr)
+        by_branch.setdefault(((p.get("head") or {}).get("ref") or "").lower(), pr)
+    _prs.update(at=time.time(), by_run=by_run, by_branch=by_branch)
+    return _prs
+
+
+def find_pr(t, prs):
+    nxt = (t.get("next") or {}).get("run")
+    branch = (t["branch"] or "").lower()
+    # Branch names alone are a weak match ("master", "v", "test"), so only fairly specific ones count
+    by_name = prs["by_branch"].get(branch) if len(branch) >= 6 and branch != "master" else None
+    return prs["by_run"].get(t["run"]) or (nxt and prs["by_run"].get(nxt)) or by_name
+
+
 def impact():
     """担当したテストを「取り込まれた / 合格して取り込み待ち / 不合格 / 実行中」に分け、対局数と CPU 時間を合計する。"""
     with _impact_lock:
@@ -1950,6 +2008,17 @@ def impact():
                 t["outcome"] = "not merged"
             elif state == "running":
                 t["outcome"] = "running"
+        # A pass is waiting for a merge when it passed the long round or someone opened a PR for it
+        # (speed-ups and cleanups only need STC); the rest are first-round passes, research runs and drops
+        prs = open_prs()
+        for t in tests:
+            if t["outcome"] != "passed":
+                continue
+            t["pr"] = find_pr(t, prs)
+            nxt = t.get("next") or {}
+            passed_long = (t["tc"] in LONG_TCS and t["branch"] != "master") or (nxt.get("state") == "passed" and nxt.get("tc") in LONG_TCS)
+            if t["pr"] or passed_long:
+                t["outcome"] = "waiting"
         totals = {}
         for t in tests:
             agg = totals.setdefault(t["outcome"], {"tests": 0, "games": 0, "cpu_hours": 0.0})
